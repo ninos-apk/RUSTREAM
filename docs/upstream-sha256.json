@@ -1,0 +1,20 @@
+[
+  {
+    "path": "src/playlist.rs",
+    "sha256": "1B6CCF631210C45F2D680E061B4E30CE98C04747CB616715169A6077912C3727",
+    "upstream_sha256": "04BEFC78204FDC47361F28795D08C40E19D02CFF1CA2463100169FD41C565219",
+    "adaptation": "Streaming sink, format validation and lazy series metadata for Android catalog 0.3.0"
+  },
+  {
+    "path": "src/recovery.rs",
+    "sha256": "748F2D01BE0EEA2A987804D262FE0CD01CF8A7A86D9BF2FA564477435D1E06C0"
+  },
+  {
+    "path": "src/buffering.rs",
+    "sha256": "1EC9B04150FFA628732D08485E1A76AFBD18DDAE3C3A555EB63AD25AC4C51303"
+  },
+  {
+    "path": "src/telemetry.rs",
+    "sha256": "6B8E122227E820A7D3F812FFEBBED50750B7FF295FF53B767D991495D03C3E94"
+  }
+]

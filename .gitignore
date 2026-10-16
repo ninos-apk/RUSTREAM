@@ -1,0 +1,16 @@
+/.tools/
+/target/
+/artifacts/
+/.gradle/
+/.kotlin/
+/**/build/
+/local.properties
+/app/src/main/jniLibs/
+*.jks
+*.keystore
+*.log
+.idea/
+# Private provider lists are supplied separately to the test device.
+app/src/androidTest/assets/*.m3u
+app/src/androidTest/assets/*.m3u8
+

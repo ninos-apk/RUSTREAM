@@ -1,0 +1,15 @@
+[package]
+name = "iptv-jni"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "iptv_jni"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+iptv-core = { path = "../iptv-core" }
+jni = "0.21.1"
+serde_json.workspace = true
+
