@@ -75,7 +75,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var resultCount: TextView
     private lateinit var startup: StartupPane
     private lateinit var clearFiltersButton: Button
-    private val artwork=ArtworkLoader()
+    private lateinit var artwork:ArtworkLoader
+    private var prefetchWork:Job?=null
+    private var artworkForward=true
+    private var lastScrollAt=0L
+    private var lastPrefetchAt=0L
     private lateinit var browserColumn:LinearLayout
     private lateinit var mediaColumn:LinearLayout
     private lateinit var seriesHeader:LinearLayout
@@ -172,11 +176,14 @@ class MainActivity : ComponentActivity() {
         const val STATUS="status"
         /** Category name the Rust core assigns to entries without a group. */
         const val UNCATEGORIZED="Ohne Kategorie"
+        /** Key repeat scrolls every 50 ms; scroll steps closer than this mean a held D-pad. */
+        const val FAST_SCROLL_MS=160L
     }
 
     override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(AppLanguage.wrap(newBase)) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        artwork=ArtworkLoader(applicationContext)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         loader = SourceLoader(applicationContext); store = SourceStore(this); epgStore = SourceStore(this, "epg.enc")
         try { core = Core() } catch (_: Throwable) {
@@ -357,8 +364,32 @@ class MainActivity : ComponentActivity() {
                 val layout=view.layoutManager as LinearLayoutManager
                 if (layout.findLastVisibleItemPosition()>=channelRows.itemCount-12) loadNextPage()
                 if(layout.findFirstVisibleItemPosition()<=12&&offset>0)loadPreviousPage()
+                if(dy!=0)artworkForward=dy>0
+                schedulePrefetch(dy!=0)
             }
         })
+    }
+    /** A held D-pad gets a one-row window that keeps up with the focus; a pause widens it, and an
+     * idle grid warms the next rows of the loaded page into the disk cache at the lowest priority. */
+    private fun schedulePrefetch(moved:Boolean){
+        val now=android.os.SystemClock.uptimeMillis()
+        val fast=moved&&now-lastScrollAt<FAST_SCROLL_MS
+        if(moved)lastScrollAt=now
+        if(!fast||now-lastPrefetchAt>=100){lastPrefetchAt=now;prefetchArtwork(if(fast)1 else 3,if(fast)0 else 1)}
+        prefetchWork?.cancel()
+        prefetchWork=scope.launch{delay(FAST_SCROLL_MS);prefetchArtwork(3,1);delay(1_200);prefetchArtwork(8,2)}
+    }
+    private fun prefetchArtwork(ahead:Int,behind:Int){
+        val layout=channels.layoutManager as? GridLayoutManager
+        if(layout==null||!gridMode||!channels.isShown){artwork.prefetch(emptyList());return}
+        val columns=layout.spanCount;val rev=revision
+        val positions=ArtworkPolicy.prefetchWindow(layout.findFirstVisibleItemPosition(),layout.findLastVisibleItemPosition(),columns,channelRows.itemCount,artworkForward,ahead,behind)
+        // Two rows are decoded into memory; further rows are only downloaded into the disk cache.
+        artwork.prefetch(positions.map{channelRows.rows[it].let{row->artworkKey(rev,row.id,row.series) to artworkAddress(rev,row.id,row.series)}},columns*2)
+    }
+    private fun artworkKey(rev:Long,id:Long,series:Boolean)="$rev:$id:$series"
+    private fun artworkAddress(rev:Long,id:Long,series:Boolean):suspend ()->String?={
+        core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}
     }
     private fun settingsDialog() {
         val choices=listOf(R.string.settings_sources,R.string.settings_add_file,R.string.settings_add_url,R.string.settings_xtream,R.string.settings_epg,R.string.settings_picture,
@@ -627,6 +658,9 @@ class MainActivity : ComponentActivity() {
         val layout=channels.layoutManager as? GridLayoutManager ?: return
         val columns=(channels.width/dp(if(resources.configuration.fontScale>1.3f)146 else 108)).coerceIn(1,9)
         if(layout.spanCount!=columns)layout.spanCount=columns
+        // Card cell minus end margin and padding (Rows.onCreateViewHolder); posters are 2:3.
+        val poster=(channels.width-channels.paddingLeft-channels.paddingRight)/columns-dp(18)
+        if(poster>0)artwork.setTargetSize(poster,poster*3/2)
     }
     private fun updateLibraryLayout(){
         if(!::browserColumn.isInitialized)return
@@ -656,6 +690,7 @@ class MainActivity : ComponentActivity() {
         channelHeading.visibility=channelSearch.visibility
         channels.contentDescription=getString(if(openedSeries!=null)R.string.episodes_list else if(shouldGrid)(if(kind=="series")R.string.series_library else R.string.movie_library) else R.string.entries_list)
         channels.post{updateGridColumns()}
+        if(!shouldGrid){prefetchWork?.cancel();artwork.prefetch(emptyList())}
     }
     private fun openMovie(row:Row){
         if(busy)return
@@ -664,7 +699,7 @@ class MainActivity : ComponentActivity() {
         movieTitle.text=listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")
         updateMovieActions()
         val rev=revision
-        artwork.bind(moviePoster,"$rev:${row.id}:false"){core.call("artwork","revision" to rev,"id" to row.id,"series" to false).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
+        artwork.bind(moviePoster,artworkKey(rev,row.id,false),artworkAddress(rev,row.id,false))
         updateLibraryLayout();moviePlay.requestFocus()
     }
     private fun openSeries(id:Long){
@@ -696,7 +731,7 @@ class MainActivity : ComponentActivity() {
             seriesTitle.maxLines=if(resources.configuration.fontScale>1.3f)2 else 3
             seriesTitle.ellipsize=TextUtils.TruncateAt.END
             seriesTitle.contentDescription=summary
-            artwork.bind(seriesPoster,"$rev:$id:true"){core.call("artwork","revision" to rev,"id" to id,"series" to true).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
+            artwork.bind(seriesPoster,artworkKey(rev,id,true),artworkAddress(rev,id,true))
             updateSeasonLabel();updateSeriesActions();updateLibraryLayout();firstChannelFocus=true
             libraryFocusId=null;search();channels.scrollToPosition(0)
         }
@@ -803,6 +838,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
+        if (::artwork.isInitialized) artwork.setActive(true)
         if (!::playback.isInitialized) return
         val previous = lifecycleWork
         lifecycleWork = scope.launch { previous?.join(); playback.start() }
@@ -819,6 +855,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStop() {
         if (::playerPane.isInitialized) playerPane.cancelSeek()
+        // Downloads already running finish into the caches; nothing new starts in the background.
+        if (::artwork.isInitialized) artwork.setActive(false)
         if (::playback.isInitialized) {
             val previous = lifecycleWork
             // The release reports the final position; write it now instead of relying on app exit.
@@ -828,11 +866,15 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         if (::playback.isInitialized) { playback.release(); if (userLibraryLoaded) libraryStore.flush(userLibrary) }
-        artwork.close()
+        if (::artwork.isInitialized) artwork.close()
         scope.cancel()
         if (::loader.isInitialized) loader.close()
         if (::core.isInitialized) core.close()
         super.onDestroy()
+    }
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (::artwork.isInitialized) artwork.trim(level)
     }
     private fun launchSafe(block: suspend () -> Unit): Job {
         return scope.launch {
@@ -1022,7 +1064,7 @@ class MainActivity : ComponentActivity() {
                 var localStart=channelRows.itemCount
                 channelRows.append(List(array.length()) { i-> val c=array.getJSONObject(i); Row.from(c) })
                 if(channelRows.itemCount>512){
-                    val drop=channelRows.itemCount-512
+                    val drop=wholeRows(channelRows.itemCount-512)
                     val layout=channels.layoutManager as LinearLayoutManager
                     val first=layout.findFirstVisibleItemPosition()
                     val top=layout.findViewByPosition(first)?.top?:0
@@ -1037,6 +1079,12 @@ class MainActivity : ComponentActivity() {
             } finally { if(generation==searchGeneration) { loadingPage=false; focusNextPage=false; selectNextPage=false;resumePreviousPage() } }
         }
     }
+    /** [count] rounded up to whole grid rows. Dropping or prepending a partial row would move every
+     * card by some columns, and a held D-pad could then lose the focused card off screen. */
+    private fun wholeRows(count:Int):Int{
+        val columns=(channels.layoutManager as? GridLayoutManager)?.spanCount ?: 1
+        return (count+columns-1)/columns*columns
+    }
     private fun resumePreviousPage(){
         if(!pendingPrevious)return
         val focus=pendingPreviousFocus;val select=pendingPreviousSelect
@@ -1048,7 +1096,7 @@ class MainActivity : ComponentActivity() {
         if(loadingPage){pendingPrevious=true;pendingPreviousFocus=pendingPreviousFocus||focusNew;pendingPreviousSelect=pendingPreviousSelect||selectNew;return}
         loadingPage=true
         val generation=searchGeneration;val requestRevision=revision
-        val requestOffset=(offset-64).coerceAtLeast(0);val oldOffset=offset
+        val requestOffset=(offset-wholeRows(64)).coerceAtLeast(0);val oldOffset=offset
         val requestKind=kind;val requestCategory=category;val requestQuery=query;val requestSpecial=special.takeIf{openedSeries==null}
         launchSafe{try{
             val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,(oldOffset-requestOffset),requestSpecial)
@@ -1292,7 +1340,7 @@ class MainActivity : ComponentActivity() {
             .put("build_id",BuildConfig.CORE_BUILD_ID)
             .put("core",core.call("info")).put("import",loader.lastReport).put("last_error",lastFailure?:JSONObject.NULL)
             .put("playback_error",playback.lastError?:JSONObject.NULL)
-            .put("user_library",libraryStore.diagnostics(userLibrary))
+            .put("user_library",libraryStore.diagnostics(userLibrary)).put("artwork",artwork.stats())
         if(android.os.Build.VERSION.SDK_INT>=30){
             val manager=getSystemService(android.app.ActivityManager::class.java)
             val exit=manager.getHistoricalProcessExitReasons(packageName,0,1).firstOrNull()
@@ -1456,10 +1504,7 @@ class MainActivity : ComponentActivity() {
             }
             holder.root.setOnClickListener{select(row)}
             holder.root.setOnLongClickListener{if(channelList)rowActions(row) else showRowTitle(row);true}
-            holder.image?.let{view->
-                val rev=revision;val id=row.id;val series=row.series
-                artwork.bind(view,"$rev:$id:$series"){core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
-            }
+            holder.image?.let{view->artwork.bind(view,artworkKey(revision,row.id,row.series),artworkAddress(revision,row.id,row.series))}
             holder.root.setOnKeyListener{_,key,event->
                 if(key in setOf(KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER)){
                     // OK acts on release, so holding it opens the actions instead of also starting playback.
@@ -1493,7 +1538,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         override fun onViewRecycled(holder:Holder){
-            holder.image?.apply{tag=null;setImageDrawable(null)}
+            holder.image?.apply{artwork.unbind(this);setImageDrawable(null)}
             (holder.image as? PosterImageView)?.onStar=null
             holder.row=null;holder.okDown=false;holder.okLong=false
             super.onViewRecycled(holder)

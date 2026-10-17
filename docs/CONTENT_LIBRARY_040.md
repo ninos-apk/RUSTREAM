@@ -36,7 +36,7 @@ Schema-1-Kataloge bleiben für den Offline-Übergang lesbar. Sie enthalten nicht
 
 ## Cover
 
-Zwei Hintergrundworker verwenden OkHttp und einen bytebegrenzten 16-MiB-Bitmapcache. Warteschlange: 48 Aufträge; Antwortlimit: 8 MiB; Gesamtzeit: 20 Sekunden; Fehlerversuche pausieren 60 Sekunden. Dimensionen werden vor der eigentlichen Dekodierung geprüft und durch Sampling begrenzt. PNG/JPEG/WebP/BMP werden anhand des Inhalts erkannt. Es gibt keine Bildpersistenz auf Disk. Fehlende Bilder erhalten einen skalierbaren Platzhalter. View-Recycling und Revisionsschlüssel verhindern, dass alte Ergebnisse neue Karten überschreiben.
+`ArtworkLoader` lädt Cover über Speicher → Disk → Netz mit sichtbaren Karten zuerst, begrenztem Prefetch, einem persistenten, größenbegrenzten Disk-Cache (Dateinamen sind HMACs, keine Adressen) und Wiederholung vorübergehender Fehler mit Backoff. Dimensionen werden vor der Dekodierung geprüft; dekodiert wird auf die tatsächliche Postergröße. Fehlende Bilder erhalten einen skalierbaren Platzhalter. View-Recycling und Revisionsschlüssel verhindern, dass alte Ergebnisse neue Karten überschreiben. Ursachenanalyse, Budgets und Messwerte: [Cover-Pipeline](ARTWORK_PIPELINE.md).
 
 Der Import selbst lädt keine Cover oder Providerstreams. Die visuellen Tests erzeugen ihre Poster lokal und verwenden ausschließlich synthetische Medien.
 
