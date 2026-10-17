@@ -46,7 +46,7 @@ android {
 val buildRust by tasks.registering(Exec::class) {
     workingDir(rootDir)
     commandLine("powershell.exe", "-NoProfile", "-File", "scripts/build-rust.ps1")
-    inputs.files(rootProject.fileTree("crates") { include("**/*.rs", "**/Cargo.toml") }, rootProject.file("Cargo.lock"), rootProject.file("scripts/build-rust.ps1"))
+    inputs.files(rootProject.fileTree("crates") { include("**/*.rs", "**/Cargo.toml") }, rootProject.file("Cargo.lock"), rootProject.file("scripts/build-rust.ps1"), rootProject.file("scripts/env.ps1"))
     outputs.dir("src/main/jniLibs")
 }
 tasks.named("preBuild") { dependsOn(buildRust) }

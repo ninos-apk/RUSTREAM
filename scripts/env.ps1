@@ -1,6 +1,16 @@
 $ErrorActionPreference = 'Stop'
 Remove-Item Env:\ANDROID_PREFS_ROOT -ErrorAction SilentlyContinue
 $tvRoot = Split-Path -Parent $PSScriptRoot
+# Hosted CI supplies Java, Rust and the Android SDK. Keep those runner-managed paths.
+if ($env:GITHUB_ACTIONS -eq 'true') {
+    if (!$env:ANDROID_HOME -and $env:ANDROID_SDK_ROOT) { $env:ANDROID_HOME = $env:ANDROID_SDK_ROOT }
+    if (!$env:ANDROID_HOME -or !$env:JAVA_HOME) { throw 'CI requires ANDROID_HOME and JAVA_HOME' }
+    $env:ANDROID_NDK_HOME = "$env:ANDROID_HOME/ndk/28.2.13676358"
+    $env:ANDROID_USER_HOME = "$tvRoot/.tools/android-user"
+    $env:RUSTUP_TOOLCHAIN = '1.99.0-x86_64-pc-windows-msvc'
+    $env:PATH = "$env:JAVA_HOME/bin;$env:ANDROID_HOME/platform-tools;$env:PATH"
+    return
+}
 $windowsRoot = Join-Path (Split-Path $tvRoot) 'IPTV Player'
 $rustTools = "$tvRoot/.tools"
 if (Test-Path "$windowsRoot/.tools/cargo/bin/rustup.exe") { $rustTools = "$windowsRoot/.tools" }

@@ -16,6 +16,8 @@ Native TV-App auf Basis des vorhandenen Windows-Rust-Players. Kotlin übernimmt 
 
 ## Bauen und installieren
 
+Getaggte Entwicklungsversionen können automatisch als APK in GitHub-Prereleases erscheinen: [Tags und APK-Releases](docs/GITHUB_RELEASES.md). Ein normaler Push auf `main` veröffentlicht keine Version.
+
 PowerShell 7, Windows x64 und Internet für das erste Setup:
 
 ```powershell

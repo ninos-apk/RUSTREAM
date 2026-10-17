@@ -1,0 +1,117 @@
+name: Tagged development APK
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tagged-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check that the tag matches the app version
+        id: version
+        run: |
+          $release = ./scripts/check-release-tag.ps1 -Tag $env:RELEASE_TAG
+          "version=$($release.Version)" >> $env:GITHUB_OUTPUT
+          "code=$($release.VersionCode)" >> $env:GITHUB_OUTPUT
+
+      - name: Restore the development signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DEVELOPMENT_KEYSTORE_BASE64 }}
+        run: |
+          if (!$env:KEYSTORE_BASE64) { throw 'Configure the DEVELOPMENT_KEYSTORE_BASE64 repository secret before pushing a release tag. See docs/GITHUB_RELEASES.md.' }
+          New-Item -ItemType Directory -Force .tools/android-user | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $PWD '.tools/android-user/debug.keystore'), [Convert]::FromBase64String($env:KEYSTORE_BASE64))
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install the Android SDK packages
+        run: |
+          $manager = "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+          & $manager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+          if ($LASTEXITCODE) { throw 'Android SDK setup failed' }
+          "sdk.dir=$($env:ANDROID_HOME.Replace('\','/').Replace(':','\:'))" | Set-Content -Encoding utf8NoBOM local.properties
+
+      - name: Install the pinned Rust toolchain and Android targets
+        run: |
+          rustup toolchain install 1.99.0-x86_64-pc-windows-msvc --profile minimal --component rustfmt --component clippy
+          if ($LASTEXITCODE) { throw 'Rust setup failed' }
+          rustup target add --toolchain 1.99.0-x86_64-pc-windows-msvc aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          if ($LASTEXITCODE) { throw 'Android Rust target setup failed' }
+
+      - name: Check Rust and build the Android release
+        run: |
+          . ./scripts/env.ps1
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { throw 'Rust formatting failed' }
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          if ($LASTEXITCODE) { throw 'Rust lint failed' }
+          cargo test --locked --workspace
+          if ($LASTEXITCODE) { throw 'Rust tests failed' }
+          ./gradlew.bat testDebugUnitTest lintDebug assembleRelease --console=plain
+          if ($LASTEXITCODE) { throw 'Android build or checks failed' }
+
+      - name: Sign and verify the APK
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          APP_VERSION_CODE: ${{ steps.version.outputs.code }}
+          DEVELOPMENT_KEY_PASSWORD: android
+        run: |
+          . ./scripts/env.ps1
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $apk = "artifacts/RUSTREAM-IPTV-PLAYER-$env:APP_VERSION.apk"
+          $signer = "$env:ANDROID_HOME/build-tools/36.0.0/apksigner.bat"
+          & $signer sign --ks "$env:ANDROID_USER_HOME/debug.keystore" --ks-key-alias androiddebugkey --ks-pass env:DEVELOPMENT_KEY_PASSWORD --key-pass env:DEVELOPMENT_KEY_PASSWORD --out $apk app/build/outputs/apk/release/app-release-unsigned.apk
+          if ($LASTEXITCODE) { throw 'APK signing failed' }
+          & $signer verify $apk
+          if ($LASTEXITCODE) { throw 'APK signature verification failed' }
+          $metadata = & "$env:ANDROID_HOME/build-tools/36.0.0/aapt.exe" dump badging $apk
+          if ($LASTEXITCODE) { throw 'Cannot read APK metadata' }
+          if ($metadata[0] -notmatch "versionName='$([regex]::Escape($env:APP_VERSION))'" -or $metadata[0] -notmatch "versionCode='$env:APP_VERSION_CODE'") { throw 'APK version does not match the tag/source' }
+          ./scripts/verify-package.ps1 -Apk $apk
+          if ($LASTEXITCODE) { throw 'APK alignment verification failed' }
+          $hash = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([IO.Path]::GetFileName($apk))" | Set-Content -Encoding ascii "$apk.sha256"
+
+      - name: Publish the tagged development prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $apk = "artifacts/RUSTREAM-IPTV-PLAYER-$env:APP_VERSION.apk"
+          # Re-running a published version must not replace its original APK.
+          gh release create $env:RELEASE_TAG $apk "$apk.sha256" --verify-tag --prerelease --latest=false --title "RUSTREAM IPTV PLAYER $env:APP_VERSION (development)" --generate-notes --notes 'Development build for testing, signed with the development key. Not a stable release.'
+          if ($LASTEXITCODE) { throw 'Prerelease publishing failed; existing releases are never overwritten' }
+
+      - name: Remove the temporary signing key
+        if: always()
+        run: |
+          $key = Join-Path $PWD '.tools/android-user/debug.keystore'
+          if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Force }
