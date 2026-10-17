@@ -4,6 +4,7 @@ package de.iptv.tv
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import androidx.core.view.descendants
 import androidx.media3.exoplayer.ExoPlayer
@@ -11,6 +12,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import kotlinx.coroutines.CoroutineScope
@@ -37,21 +39,37 @@ class UiDesignTest {
         while(!done && SystemClock.elapsedRealtime()<deadline){scenario.onTvActivity { done=check(it) };if(!done)SystemClock.sleep(40)}
         assertTrue(message,done)
     }
+    /** Dialogs are operated with remote keys, never taps. During a dialog's enter animation its reported
+     * bounds are shifted (37 px down in the settings menu), but a tap is injected only after the animation
+     * and lands beside the target. Keys instead queue until the new dialog owns input focus.
+     */
+    private fun pressFocused(selector:BySelector,timeout:Long=5_000) {
+        assertTrue("Focused: $selector",device.wait(Until.hasObject(selector.focused(true)),timeout))
+        device.pressDPadCenter()
+    }
+    /** requestFocus() for a view of a dialog window, which the activity's view tree does not contain. */
+    private fun focusDialogView(resource:String) {
+        val node=instrumentation.uiAutomation.windows.firstNotNullOfOrNull { it.root?.findAccessibilityNodeInfosByViewId(resource)?.firstOrNull() }
+        assertNotNull("Dialog shows $resource",node)
+        assertTrue("Focus moves to $resource",node!!.performAction(AccessibilityNodeInfo.ACTION_FOCUS))
+    }
     @Test fun emptyStartAndInvalidFormKeepLabelsAndInput() {
         val store=SourceStore(context);val old=store.load()
         try {
             store.save(emptyList())
             withTvActivity {
-                assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
-                device.pressDPadCenter()
-                assertTrue(device.wait(Until.hasObject(By.text("URL hinzufügen")),5_000))
-                device.findObject(By.text("URL hinzufügen")).click()
+                pressFocused(By.text("Quelle hinzufügen"),10_000)
+                assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
+                device.pressDPadDown();device.pressDPadDown()
+                pressFocused(By.text("URL hinzufügen"))
                 assertTrue(device.wait(Until.hasObject(By.desc("HTTP(S)-URL")),5_000))
                 device.findObject(By.desc("Name")).text="UI behalten"
                 device.findObject(By.desc("HTTP(S)-URL")).text="ungueltig"
-                val submit=device.wait(Until.findObject(By.res("android:id/button1")),5_000)
-                assertNotNull("Import dialog keeps its submit action",submit)
-                submit.click()
+                // DPAD_DOWN does not leave the focused Name field here, so focus the submit action directly.
+                focusDialogView("android:id/button1")
+                pressFocused(By.res("android:id/button1"))
+                // Only the rejected submit moves focus to the address; the dialog keeps labels and input.
+                assertTrue(device.wait(Until.hasObject(By.desc("HTTP(S)-URL").focused(true)),5_000))
                 assertTrue(device.hasObject(By.desc("Name").text("UI behalten")))
                 assertTrue(device.hasObject(By.desc("HTTP(S)-URL").text("ungueltig")))
                 assertTrue(device.hasObject(By.text("Playlist-Adresse")))
@@ -115,16 +133,23 @@ class UiDesignTest {
         try {
             store.save(listOf(JSONObject().put("kind","file").put("name","Quelle behalten").put("uri",android.net.Uri.fromFile(file).toString())))
             withTvActivity { scenario ->
-                assertTrue(device.wait(Until.hasObject(By.desc("Removal Demo")),10_000))
-                scenario.onTvActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Einstellungen" }.requestFocus() }
-                device.pressDPadCenter();device.pressDPadCenter()
+                // The app focuses the first channel once the list is laid out; move focus only after that.
+                assertTrue(device.wait(Until.hasObject(By.desc("Removal Demo").focused(true)),10_000))
+                scenario.onTvActivity { activity -> assertTrue(activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Einstellungen" }.requestFocus()) }
+                pressFocused(By.desc("Einstellungen"))
+                pressFocused(By.text("Quellen verwalten"))
                 assertTrue(device.wait(Until.hasObject(By.text("Gespeicherte Playlists")),5_000))
-                device.findObject(By.res("android:id/button3")).click()
+                // The playlist list has focus; "Entfernen" is the leftmost action of the button bar below it.
+                device.pressDPadDown();device.pressDPadLeft()
+                pressFocused(By.res("android:id/button3"))
                 assertTrue(device.wait(Until.hasObject(By.text("Quelle entfernen")),5_000))
-                device.findObject(By.text("Quelle behalten")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Quelle „Quelle behalten“ entfernen?")),5_000))
-                assertTrue(device.wait(Until.hasObject(By.res("android:id/button2").focused(true)),5_000))
+                // The playlist dialog lists the same entry; only the removal list may be left.
+                assertTrue(device.wait(Until.gone(By.text("Gespeicherte Playlists")),5_000))
+                assertTrue(device.wait(Until.hasObject(By.text("Quelle behalten").selected(true)),5_000))
                 device.pressDPadCenter()
+                assertTrue(device.wait(Until.hasObject(By.text("Quelle „Quelle behalten“ entfernen?")),5_000))
+                pressFocused(By.res("android:id/button2"))
+                assertTrue(device.wait(Until.gone(By.text("Quelle „Quelle behalten“ entfernen?")),5_000))
                 assertEquals(1,store.load().size)
                 assertEquals("Quelle behalten",store.load().first().getString("name"))
             }
