@@ -1,0 +1,6 @@
+<resources>
+    <!-- Match the existing TV panel, primary text and accent palette. -->
+    <color name="branding_background">#131923</color>
+    <color name="branding_text">#FFFFFF</color>
+    <color name="branding_accent">#67DED3</color>
+</resources>

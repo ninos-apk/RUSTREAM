@@ -10,7 +10,7 @@ Unter der Version steht **developed by Ninos Oshana**. Startbildschirm und Toolb
 
 ## Logo und Android-Ressourcen
 
-Das bereitgestellte Original `app/src/assets/logo/logo.png` bleibt die Quelle. `scripts/prepare-branding.ps1` exportiert daraus mit Windows/System.Drawing die Android-Ressourcen. Dabei werden Größe und Plattformflächen angepasst; das Motiv bleibt erhalten.
+Seit dem Logo-Update vom 17. Oktober 2026 ist `app/src/assets/logo/new_logo.png` die Quelle. Die dunkle Ableitung `app/src/assets/logo/new_logo_dark.png` ersetzt die helle Außenfläche durch Blaugrau für das dunkle TV-UI; das bereitgestellte Original bleibt erhalten. `scripts/prepare-branding.ps1` exportiert daraus mit Windows/System.Drawing die Android-Ressourcen für App-/Installer-Icon, TV-Banner, Start-/Ladebildschirm und App-Info. Icons und TV-Banner verwenden das vorhandene dunkle Blaugrau `#131923`; auch die UI-Version verwendet diese dunkle Fläche. Die semantischen Farben stehen in `app/src/main/res/values/branding.xml`. Das Quellarchiv enthält Original und dunkle Ableitung.
 
 - Klassische TV-Icons: 80/120/160/240/320 px in den fünf Dichtestufen.
 - Adaptives Launcher-Icon ab API 26: Hintergrund und gepolsterter Logo-Vordergrund für unterschiedliche Masken.
@@ -18,6 +18,16 @@ Das bereitgestellte Original `app/src/assets/logo/logo.png` bleibt die Quelle. `
 - In-App-Logo: 512×512 px, damit das große Original nicht bei jedem Start vollständig decodiert werden muss.
 
 Die Größen richten sich nach den [Android-TV-Icon-Vorgaben](https://developer.android.com/design/ui/tv/guides/system/tv-app-icon-guidelines). Das Original ist kein unreferenziertes APK-Asset, sondern eine ausdrücklich erlaubte Quelldatei im Quellarchiv. Die vorhandene Ausschlussregel für private Playlist-Testassets bleibt bestehen.
+
+## Farbprüfung des Logo-Updates vom 17. Oktober 2026
+
+| Severity | Location | Before | After | Why |
+| --- | --- | --- | --- | --- |
+| LOW | `app/src/main/res/values/branding.xml:3`, `scripts/prepare-branding.ps1` und alle daraus exportierten Branding-Bilder | Große weiße Logo-/Bannerfläche | Dunkles Blaugrau `#131923`, weiße Titel und türkisfarbene Unterzeile | Vorhandene TV-Palette wiederverwenden; die helle Fläche dominiert Startseite und App-Info nicht mehr. |
+
+Gemessene WCAG-2-Kontraste der Banner-Schriftfarben auf der tatsächlich exportierten Hintergrundfarbe `#131923`: `#FFFFFF` **17,63:1**, `#67DED3` **10,89:1**. Beide überschreiten den hier verwendeten AA-Maßstab von 4,5:1 für normalen Text. Das Logo selbst ist eine Markenabbildung; seine Farbverläufe werden nicht als Text-Kontrastpaar bewertet. Die Farbwerte liegen im sRGB-Farbraum. Beurteilung auf einem physischen Fernseher: nicht geprüft.
+
+Startseite und App-Info im TV-Emulator visuell geprüft; Icon und Banner als exportierte Ressourcen geprüft. Der vorhandene Branding-Instrumentierungstest besteht (1 Test, 0 Fehler). Debug-/Release-APK und AAB gebaut; Lint: 0 Fehler, 59 Warnungen. Protokoll: `artifacts/new-logo-dark-build.log`. Screenshots: `artifacts/dark-logo-rustream-startup.png` und `artifacts/dark-logo-rustream-app-info.png`. Farbprüfung dieses Branding-Umfangs: **Approve**.
 
 ## Ausgaben und Prüfung
 

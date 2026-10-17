@@ -2,7 +2,7 @@
 
 RUSTREAM IPTV ist ein IPTV-Player mit einem in Rust entwickelten Core. Der Fokus liegt auf hoher Performance und einem flüssigen Streaming-Erlebnis – besonders bei Live-Sport und Fußball.
 
-**Branding 0.4.1:** Eigener App-Name im Installer und TV-System, Launcher-Icon und TV-Banner aus dem bereitgestellten Logo, Markenanzeige im Startbildschirm und **Einstellungen → App-Info** mit Beschreibung und Version. Installierbare Testfassung: `artifacts/RUSTREAM-IPTV-0.4.1.apk`; Debug: `RUSTREAM-IPTV-debug.apk`; Bundle: `RUSTREAM-IPTV-release-unsigned.aab`. Das Logo-Original liegt in `app/src/assets/logo/logo.png`, die Android-Exporte werden mit `scripts/prepare-branding.ps1` reproduziert. Die Paket-ID bleibt für Updates bestehender Installationen erhalten.
+**Branding (Logo-Update vom 17. Oktober 2026):** Eigener App-Name im Installer und TV-System, Launcher-Icon und TV-Banner aus dem bereitgestellten Logo, Markenanzeige im Startbildschirm und **Einstellungen → App-Info** mit Beschreibung und Version. Installierbare Testfassung: `artifacts/RUSTREAM-IPTV-0.5.0.apk`; Debug: `RUSTREAM-IPTV-debug.apk`; Bundle: `RUSTREAM-IPTV-release-unsigned.aab`. Das Logo-Original liegt in `app/src/assets/logo/new_logo.png`, die dunkle UI-Ableitung in `new_logo_dark.png`. Die Android-Exporte mit dunklen Icon-/Bannerflächen werden mit `scripts/prepare-branding.ps1` reproduziert. Die Paket-ID bleibt für Updates bestehender Installationen erhalten.
 
 Native TV-App auf Basis des vorhandenen Windows-Rust-Players. Kotlin übernimmt Android, Fernbedienung und Media3; Rust übernimmt M3U, Suchindex, Xtream-Datenmodell, XMLTV und Recovery. Die Windows-App im Nachbarordner bleibt unverändert.
 

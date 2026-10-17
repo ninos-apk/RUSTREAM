@@ -4,7 +4,6 @@
     <string name="app_info">App-Info</string>
     <string name="app_version">Version %1$s</string>
     <string name="app_developer" translatable="false">developed by Ninos Oshana</string>
-    <color name="launcher_background">#FBF5E9</color>
 
     <!-- General -->
     <string name="close">Schließen</string>

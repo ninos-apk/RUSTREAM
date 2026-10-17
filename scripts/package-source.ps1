@@ -6,7 +6,8 @@ $files = @('Cargo.toml','Cargo.lock','rust-toolchain.toml','settings.gradle.kts'
 foreach ($folder in @('crates','docs','scripts','gradle','app/src')) {
     $files += Get-ChildItem -LiteralPath (Join-Path $tvRoot $folder) -File -Recurse |
         Where-Object { $_.FullName -notmatch '[\\/]jniLibs[\\/]' -and
-            ($_.FullName -notmatch '[\\/]assets[\\/]' -or $_.Name -eq 'fixture.mp4' -or $_.FullName -eq (Join-Path $tvRoot 'app/src/assets/logo/logo.png')) } |
+            ($_.FullName -notmatch '[\\/]assets[\\/]' -or $_.Name -eq 'fixture.mp4' -or
+                $_.FullName -in @((Join-Path $tvRoot 'app/src/assets/logo/new_logo.png'), (Join-Path $tvRoot 'app/src/assets/logo/new_logo_dark.png'))) } |
         ForEach-Object { [IO.Path]::GetRelativePath($tvRoot, $_.FullName) }
 }
 foreach ($relative in $files) {
