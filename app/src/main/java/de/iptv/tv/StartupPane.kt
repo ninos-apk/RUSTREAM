@@ -39,7 +39,7 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
             setPadding(TvUi.dp(context, 32), TvUi.dp(context, 30), TvUi.dp(context, 32), TvUi.dp(context, 30))
         }
         content.addView(ImageView(context).apply {
-            setImageResource(R.drawable.rustream_logo);scaleType=ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.rustream_startup_logo);scaleType=ImageView.ScaleType.FIT_CENTER
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
         },LinearLayout.LayoutParams(-1,TvUi.dp(context,if(resources.configuration.fontScale>1.3f)72 else 112)).apply{bottomMargin=TvUi.dp(context,12)})
         content.addView(brand, LinearLayout.LayoutParams(-1, -2))

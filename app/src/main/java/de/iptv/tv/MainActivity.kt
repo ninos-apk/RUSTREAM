@@ -315,7 +315,7 @@ class MainActivity : ComponentActivity() {
         browserColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
         resultCount=label(resources.getQuantityString(R.plurals.entries_count,0,0),10f).apply { setTextColor(TvUi.muted) }
         browserColumn.addView(resultCount,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
-        sidebar.addView(categoryColumn,LinearLayout.LayoutParams(dp(if(largeText)210 else 148),-1))
+        sidebar.addView(categoryColumn,LinearLayout.LayoutParams(dp(if(largeText)260 else 216),-1))
         sidebar.addView(browserColumn,LinearLayout.LayoutParams(dp(if(largeText)260 else 216),-1).apply { marginStart=dp(7); marginEnd=dp(12) })
         body.addView(sidebar,LinearLayout.LayoutParams(-2,-1))
         mediaColumn=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -1409,9 +1409,9 @@ class MainActivity : ComponentActivity() {
                 setBackgroundColor(TvUi.background)
                 root.addView(this,LinearLayout.LayoutParams(if(card)-1 else dp(28),dp(if(card)132 else 28)).apply{if(!card)marginEnd=dp(7)})
             }else null
-            val text=label("",if(card)12f else 13f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
+            val text=label("",if(card)12f else 10f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
             root.addView(text,LinearLayout.LayoutParams(if(card)-1 else 0,-2,if(card)0f else 1f))
-            val metadata=if(card)label("",10f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
+            val metadata=if(card)label("",8f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
             // List rows (channels, episodes) end with progress text and the favourite star.
             val trailing=if(channelList&&!card)label("",11f).apply{setTextColor(TvUi.muted);visibility=View.GONE;fontFeatureSettings="tnum"
                 root.addView(this,LinearLayout.LayoutParams(-2,-2).apply{marginStart=dp(4)})}else null
