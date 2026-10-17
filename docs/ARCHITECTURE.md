@@ -1,5 +1,9 @@
 # Plattformanalyse und Architektur
 
+## Inhaltsbibliothek 0.4.0
+
+Schema 2 ergänzt persistente Serienidentitäten und Episodenmitgliedschaften, Originalmetadaten sowie Jahr/Qualität. `browse` dedupliziert Serien vor dem Paging; `series_page` liefert begrenzte Staffel-/Episodenseiten. M3U-Titelgruppierung und Xtream-Anbieteridentitäten bleiben unterscheidbar. `search` bleibt die rohe Eintragsabfrage. Schema 1 ist im Offline-Übergang lesbar; die vollständige Neuklassifikation benötigt einen erneuten Quellenimport ohne alte HTTP-Validatoren. Der gemeinsame Media3-Player bleibt unabhängig vom Browserzustand; Channel-Tasten navigieren im tatsächlichen Wiedergabekontext. Architektur, Budgets und Upgrade: [Filme und Serien 0.4.0](CONTENT_LIBRARY_040.md).
+
 ## Aktueller Katalogpfad seit 0.3.0
 
 Der nachfolgend dokumentierte ursprüngliche Voll-RAM-Import wurde für den Android-Produktpfad ersetzt. `SourceLoader` verarbeitet Datei/HTTP/Xtream auf I/O-Threads und erstellt über einen kurzlebigen separaten JNI-Core einen neuen SQLite-Katalog. `parse_stream` bzw. der inkrementelle Xtream-Array-Reader schreiben einzelne Einträge transaktional; URL, Logo und Streamheader liegen als AES-256-GCM-Records vor. Zufällige Katalogschlüssel und das Quellenmanifest sind über den Android Keystore versiegelt. Kategorien und Suchtext bleiben zur Abfrage im privaten, vom Backup ausgeschlossenen Katalog.

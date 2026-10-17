@@ -20,6 +20,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ScrollView
+import android.widget.ImageView
+import android.widget.HorizontalScrollView
+import androidx.recyclerview.widget.GridLayoutManager
+import org.json.JSONArray
 import android.view.accessibility.AccessibilityNodeInfo
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import androidx.media3.ui.PlayerView
@@ -71,6 +75,31 @@ class MainActivity : ComponentActivity() {
     private lateinit var resultCount: TextView
     private lateinit var startup: StartupPane
     private lateinit var clearFiltersButton: Button
+    private val artwork=ArtworkLoader()
+    private lateinit var browserColumn:LinearLayout
+    private lateinit var mediaColumn:LinearLayout
+    private lateinit var seriesHeader:LinearLayout
+    private lateinit var seriesTitle:TextView
+    private lateinit var seriesPoster:ImageView
+    private lateinit var seasonButton:Button
+    private lateinit var movieHeader:LinearLayout
+    private lateinit var movieScroll:ScrollView
+    private lateinit var movieTitle:TextView
+    private lateinit var moviePoster:ImageView
+    private lateinit var moviePlay:Button
+    private var openedMovie:Row?=null
+    private var openedSeries:Long?=null
+    private var chosenSeason:Long?=null
+    private var unknownSeason=false
+    private var seriesSeasons=JSONArray()
+    private var seasonOffset=0
+    private var seasonTotal=0
+    private var seriesWork:Job?=null
+    private data class BrowseSnapshot(val total:Int,val focus:Long?,val index:Int)
+    private var browseSnapshot:BrowseSnapshot?=null
+    private data class PlayContext(val kind:String,val category:Long?,val query:String,val show:Long?,val season:Long?,val unknown:Boolean)
+    private var playContext:PlayContext?=null
+    private val gridMode get()=kind!="live" && openedSeries==null && openedMovie==null
     private var libraryReady = false
     private var catalogPending = false
     private var guideStarted = false
@@ -107,8 +136,9 @@ class MainActivity : ComponentActivity() {
     private var busy = false
     private var firstChannelFocus = true
     private var lifecycleWork: Job? = null
-    private val channelRows = Rows(true) { item -> selectChannel(item.id) }
+    private val channelRows = Rows(true) { item -> when{item.series->openSeries(item.id);kind=="movies"->openMovie(item);else->selectChannel(item.id)} }
     private val categoryRows = Rows { item ->
+        closeSeries(false,false)
         category = item.id.takeIf { it >= 0 }; offset = 0
         renderCategories(); search()
     }
@@ -166,13 +196,15 @@ class MainActivity : ComponentActivity() {
         stage = FrameLayout(this).apply { setBackgroundColor(TvUi.background) }
         chrome = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),dp(10),dp(18),dp(6)) }
         toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
-        toolbar.addView(label("IPTV",20f).apply { letterSpacing = 0.12f; setTypeface(typeface,android.graphics.Typeface.BOLD) }, LinearLayout.LayoutParams(dp(if(largeText)145 else 120),-2))
-        for ((key,title) in listOf("live" to "Live","movies" to "Movies","series" to "Series")) {
+        toolbar.addView(label(getString(R.string.app_name).replace(" ","\n"),14f).apply { letterSpacing = 0.06f; setTypeface(typeface,android.graphics.Typeface.BOLD);contentDescription=getString(R.string.app_name) }, LinearLayout.LayoutParams(dp(if(largeText)190 else 120),-2))
+        val tabs=LinearLayout(this)
+        for ((key,title) in listOf("live" to "Live","movies" to "Movies","series" to "Series","unclassified" to "Unzugeordnet")) {
             val tab = button(title) { switchKind(key) }
             kindButtons[key] = tab
-            toolbar.addView(tab,LinearLayout.LayoutParams(dp(if(largeText)166 else 116),-2).apply { marginEnd = dp(6) })
+            tabs.addView(tab,LinearLayout.LayoutParams(-2,-2).apply { marginEnd=dp(6) })
+            if(key=="unclassified")tab.visibility=View.GONE
         }
-        toolbar.addView(View(this),LinearLayout.LayoutParams(0,1,1f))
+        toolbar.addView(HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;addView(tabs)},LinearLayout.LayoutParams(0,-2,1f))
         settingsButton = TvIconButton(this,"settings","Einstellungen") { settingsDialog() }.apply { id = View.generateViewId() }
         toolbar.addView(settingsButton,LinearLayout.LayoutParams(dp(36),dp(36)))
         chrome.addView(toolbar,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
@@ -187,46 +219,67 @@ class MainActivity : ComponentActivity() {
         categoryEmpty = label("Keine Kategorien gefunden",12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
         categoryColumn.addView(categoryEmpty)
         categoryColumn.addView(categories,LinearLayout.LayoutParams(-1,0,1f))
-        val channelColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(5),dp(5),dp(5),0); background = TvUi.surface(TvUi.panel,dp(7).toFloat()) }
+        browserColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(5),dp(5),dp(5),0); background = TvUi.surface(TvUi.panel,dp(7).toFloat()) }
         channelHeading = label("Alle Kategorien",12f).apply { maxLines=1; ellipsize=TextUtils.TruncateAt.END }
         channelHeading.setPadding(dp(4),dp(4),dp(4),dp(6))
-        channelColumn.addView(channelHeading,LinearLayout.LayoutParams(-1,-2))
+        browserColumn.addView(channelHeading,LinearLayout.LayoutParams(-1,-2))
         channelSearch = searchField("Sender suchen") {
+            if(openedSeries!=null||openedMovie!=null)closeSeries(false,false)
             query=channelSearch.text.toString(); offset=0; searchGeneration++
             searchWork?.cancel(); searchWork=scope.launch { delay(200); search() }
         }
-        channelColumn.addView(channelSearch,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
+        browserColumn.addView(channelSearch,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
         channelEmpty = label("Keine Einträge gefunden",12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
-        channelColumn.addView(channelEmpty)
+        browserColumn.addView(channelEmpty)
         clearFiltersButton = button("Suche zurücksetzen") {
+            closeSeries(false,false)
             category=null; query=""; categorySearch.setText(""); channelSearch.setText("")
             searchWork?.cancel(); renderCategories(); search(); channelSearch.requestFocus()
         }.apply { visibility=View.GONE }
-        channelColumn.addView(clearFiltersButton,LinearLayout.LayoutParams(-1,-2))
-        channelColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
+        browserColumn.addView(clearFiltersButton,LinearLayout.LayoutParams(-1,-2))
+        seriesHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
+        seriesHeader.addView(button("← Serienbibliothek"){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
+        seriesTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8));maxLines=3}
+        seriesPoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
+        seriesHeader.addView(seriesPoster,LinearLayout.LayoutParams(-1,dp(56)))
+        seriesHeader.addView(seriesTitle)
+        seasonButton=button("Staffel wählen"){chooseSeason()}
+        seriesHeader.addView(seasonButton,LinearLayout.LayoutParams(-1,-2))
+        browserColumn.addView(seriesHeader,LinearLayout.LayoutParams(-1,-2))
+        movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
+        movieHeader.addView(button("← Filmbibliothek"){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
+        moviePoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
+        movieHeader.addView(moviePoster,LinearLayout.LayoutParams(-1,dp(100)))
+        movieTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8))}
+        movieHeader.addView(movieTitle)
+        moviePlay=button("Abspielen"){openedMovie?.let{selectChannel(it.id)}}
+        movieHeader.addView(moviePlay,LinearLayout.LayoutParams(-1,-2))
+        movieScroll=ScrollView(this).apply{isFillViewport=false;visibility=View.GONE;addView(movieHeader)}
+        browserColumn.addView(movieScroll,LinearLayout.LayoutParams(-1,0,1f))
+        browserColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
         resultCount=label("0 Einträge",10f).apply { setTextColor(TvUi.muted) }
-        channelColumn.addView(resultCount,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
+        browserColumn.addView(resultCount,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
         sidebar.addView(categoryColumn,LinearLayout.LayoutParams(dp(if(largeText)210 else 148),-1))
-        sidebar.addView(channelColumn,LinearLayout.LayoutParams(dp(if(largeText)260 else 216),-1).apply { marginStart=dp(7); marginEnd=dp(12) })
+        sidebar.addView(browserColumn,LinearLayout.LayoutParams(dp(if(largeText)260 else 216),-1).apply { marginStart=dp(7); marginEnd=dp(12) })
         body.addView(sidebar,LinearLayout.LayoutParams(-2,-1))
-        val media=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        mediaColumn=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         playerSlot=FrameLayout(this)
         playerPane=PlayerPane(this,scope,::playerAction) { target -> playback.seekTo(target) }
         video=playerPane.video
         playerSlot.addView(playerPane,FrameLayout.LayoutParams(-1,-1))
-        media.addView(playerSlot,LinearLayout.LayoutParams(-1,0,1f))
+        mediaColumn.addView(playerSlot,LinearLayout.LayoutParams(-1,0,1f))
         status=label("Sender wählen",13f).apply {
             maxLines=2; ellipsize=TextUtils.TruncateAt.END; setPadding(dp(6),dp(5),dp(6),dp(5))
             TvUi.focus(this,1f); setOnClickListener { showProgrammeDetails() }
         }
-        media.addView(status,LinearLayout.LayoutParams(-1,-2))
+        mediaColumn.addView(status,LinearLayout.LayoutParams(-1,-2))
         epg=label("Sender wählen, um das Programm anzuzeigen",12f).apply { maxLines=2; setTextColor(TvUi.muted); ellipsize=TextUtils.TruncateAt.END }
         epg.setPadding(dp(6),dp(4),dp(6),dp(4))
         TvUi.focus(epg,1f); epg.setOnClickListener { showProgrammeDetails() }
-        media.addView(epg,LinearLayout.LayoutParams(-1,-2))
+        mediaColumn.addView(epg,LinearLayout.LayoutParams(-1,-2))
         status.doAfterTextChanged { playerPane.updateInformation(status.text.toString(),epg.text.toString()) }
         epg.doAfterTextChanged { playerPane.updateInformation(status.text.toString(),epg.text.toString()) }
-        body.addView(media,LinearLayout.LayoutParams(0,-1,1f))
+        body.addView(mediaColumn,LinearLayout.LayoutParams(0,-1,1f))
         chrome.addView(body,LinearLayout.LayoutParams(-1,0,1f))
         details=ConnectionDetails(this) { playerAction("reconnect") }
         chrome.addView(details,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
@@ -239,6 +292,9 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        channels.addOnLayoutChangeListener{_,left,_,right,_,oldLeft,_,oldRight,_->
+            if(right-left!=oldRight-oldLeft)updateGridColumns()
+        }
         channels.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView,dx: Int,dy: Int) {
                 val layout=view.layoutManager as LinearLayoutManager
@@ -248,7 +304,7 @@ class MainActivity : ComponentActivity() {
         })
     }
     private fun settingsDialog() {
-        val choices=arrayOf("Quellen verwalten","Datei hinzufügen","URL hinzufügen","Xtream anmelden","EPG importieren","Bilddarstellung","Live-Pufferprofil","Diagnosebericht")
+        val choices=arrayOf("Quellen verwalten","Datei hinzufügen","URL hinzufügen","Xtream anmelden","EPG importieren","Bilddarstellung","Live-Pufferprofil","Diagnosebericht",getString(R.string.app_info))
         val dialog=AlertDialog.Builder(this).create()
         val menu=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
@@ -259,7 +315,7 @@ class MainActivity : ComponentActivity() {
         val actions=choices.mapIndexed { index,choice ->
             button(choice) {
                     dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->diagnosticsDialog() }
+                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->diagnosticsDialog(); 8->appInfoDialog() }
             }.apply {
                 menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
             }
@@ -284,6 +340,18 @@ class MainActivity : ComponentActivity() {
                 dialog.dismiss()
             }.setNegativeButton("Schließen",null).show()
     }
+    private fun appInfoDialog(){
+        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(20),dp(12),dp(20),dp(20))}
+        content.addView(ImageView(this).apply{
+            setImageResource(R.drawable.rustream_logo);scaleType=ImageView.ScaleType.FIT_CENTER
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(-1,dp(120)))
+        content.addView(label(getString(R.string.app_description),16f).apply{setLineSpacing(0f,1.25f);setPadding(0,dp(16),0,dp(12))})
+        content.addView(label(getString(R.string.app_version,BuildConfig.VERSION_NAME),12f).apply{setTextColor(TvUi.muted)})
+        content.addView(label(getString(R.string.app_developer),12f).apply{setTextColor(TvUi.muted);setPadding(0,dp(6),0,0)})
+        AlertDialog.Builder(this).setTitle(R.string.app_name).setView(ScrollView(this).apply{addView(content)})
+            .setPositiveButton("Schließen"){_,_->settingsButton.requestFocus()}.show()
+    }
     private fun bufferDialog() {
         val profiles = PlaybackBufferProfile.entries
         AlertDialog.Builder(this).setTitle("Live-Puffer · ab nächstem Verbindungsaufbau")
@@ -293,44 +361,162 @@ class MainActivity : ComponentActivity() {
                 dialog.dismiss()
             }.setNegativeButton("Schließen", null).show()
     }
-    private fun selectChannel(id: Long) {
+    private fun selectChannel(id: Long, preserveContext:Boolean=false) {
         if(selectionWork?.isActive==true || busy) return
         if (id==selectedId && playback.player!=null && playback.phase !in setOf("idle","finished","error")) {
             playerPane.cancelSeek(); setFullScreen(true); return
         }
         playerPane.cancelSeek()
-        selectionWork=launchSafe {
+        val requestContext=PlayContext(kind,category,query,openedSeries,chosenSeason,unknownSeason)
         val requestRevision=revision
+        selectionWork=launchSafe {
         val entry=core.call("entry","revision" to requestRevision,"id" to id)
+        if(requestRevision!=revision)return@launchSafe
         val seriesId=entry.optString("series_id").takeIf{it.isNotEmpty()&&it!="null"}
-        if(seriesId!=null){
-            val source=activeSource ?: return@launchSafe
-            var data=core.call("episodes","revision" to requestRevision,"id" to id,"offset" to 0)
-            if(data.getJSONArray("seasons").length()==0){
+        if(seriesId!=null){openSeries(id)}else{
+            playback.select(requestRevision,id)
+            if(!preserveContext)playContext=requestContext
+            markChannel(id);updateLibraryLayout();refreshGuide()
+        }
+    } }
+    private suspend fun fetchRows(rev:Long,section:String,group:Long?,text:String,start:Int,limit:Int):JSONObject {
+        val show=openedSeries
+        if(show==null)return core.call("browse","revision" to rev,"kind" to section,"category" to group,"query" to text,"offset" to start,"limit" to limit)
+        val data=core.call("series_page","revision" to rev,"id" to show,"season" to chosenSeason,"unknown" to unknownSeason,"offset" to start)
+        val all=data.getJSONArray("items")
+        data.put("items",JSONArray().apply{repeat(minOf(limit,all.length())){put(all.getJSONObject(it))}})
+        return data
+    }
+    private fun updateGridColumns(){
+        val layout=channels.layoutManager as? GridLayoutManager ?: return
+        val columns=(channels.width/dp(if(resources.configuration.fontScale>1.3f)146 else 108)).coerceIn(1,9)
+        if(layout.spanCount!=columns)layout.spanCount=columns
+    }
+    private fun updateLibraryLayout(){
+        if(!::browserColumn.isInitialized)return
+        val large=resources.configuration.fontScale>1.3f
+        val shouldGrid=gridMode
+        val wasGrid=channels.layoutManager is GridLayoutManager
+        if(shouldGrid!=wasGrid){
+            channels.layoutManager=if(shouldGrid)GridLayoutManager(this,2) else LinearLayoutManager(this)
+            channelRows.notifyDataSetChanged()
+        }
+        browserColumn.layoutParams=(browserColumn.layoutParams as LinearLayout.LayoutParams).apply{
+            width=if(shouldGrid)0 else dp(if(large)260 else 216);weight=if(shouldGrid)1f else 0f
+        }
+        sidebar.layoutParams=(sidebar.layoutParams as LinearLayout.LayoutParams).apply{width=if(shouldGrid)0 else -2;weight=if(shouldGrid)1.1f else 0f}
+        mediaColumn.layoutParams=(mediaColumn.layoutParams as LinearLayout.LayoutParams).apply{width=0;weight=1f}
+        val hidePlayer=shouldGrid&&(kind!="unclassified"||selectedId==null)
+        mediaColumn.visibility=if(hidePlayer)View.GONE else View.VISIBLE
+        details.visibility=mediaColumn.visibility
+        seriesHeader.visibility=if(openedSeries!=null)View.VISIBLE else View.GONE
+        seriesPoster.visibility=if(large)View.GONE else View.VISIBLE
+        movieHeader.visibility=if(openedMovie!=null)View.VISIBLE else View.GONE
+        movieScroll.visibility=movieHeader.visibility
+        openedMovie?.let{moviePlay.text=if(it.id==selectedId&&playback.player!=null)"Wiedergabe öffnen" else "Abspielen"}
+        channels.visibility=if(openedMovie!=null)View.GONE else View.VISIBLE
+        resultCount.visibility=if(openedMovie!=null)View.GONE else View.VISIBLE
+        channelSearch.visibility=if(!gridMode&&kind!="live")View.GONE else View.VISIBLE
+        channelHeading.visibility=channelSearch.visibility
+        channels.contentDescription=if(openedSeries!=null)"Episodenliste" else if(shouldGrid)"${if(kind=="series")"Serien" else "Film"}bibliothek" else "Eintragsliste"
+        channels.post{updateGridColumns()}
+    }
+    private fun openMovie(row:Row){
+        if(busy)return
+        browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
+        openedMovie=row
+        movieTitle.text=listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")
+        moviePlay.text=if(row.id==selectedId&&playback.player!=null)"Wiedergabe öffnen" else "Abspielen"
+        val rev=revision
+        artwork.bind(moviePoster,"$rev:${row.id}:false"){core.call("artwork","revision" to rev,"id" to row.id,"series" to false).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
+        updateLibraryLayout();moviePlay.requestFocus()
+    }
+    private fun openSeries(id:Long){
+        if(seriesWork?.isActive==true)return
+        val rev=revision
+        val generation=searchGeneration
+        seriesWork=launchSafe {
+            var data=core.call("series_page","revision" to rev,"id" to id,"offset" to 0)
+            val providerId=data.optString("series_id").takeIf{it.isNotEmpty()&&it!="null"}
+            if(data.getInt("total")==0&&providerId!=null){
+                val source=activeSource ?: return@launchSafe
                 status.text="Episoden werden geladen …"
-                data=loader.episodes(source,core,requestRevision,id,seriesId)
+                loader.episodes(source,core,rev,id,providerId)
+                data=core.call("series_page","revision" to rev,"id" to id,"offset" to 0)
             }
-            if(revision!=requestRevision)return@launchSafe
-            val seasons=data.getJSONArray("seasons")
-            AlertDialog.Builder(this@MainActivity).setTitle(entry.getString("name"))
-                .setItems(Array(seasons.length()){i->"Staffel ${seasons.getJSONObject(i).getLong("season")} (${seasons.getJSONObject(i).getInt("count")})"}){_,index->
-                    showEpisodes(requestRevision,id,seasons.getJSONObject(index).getLong("season"),0)
-                }.setNegativeButton("Schließen",null).show()
-        }else{playback.select(requestRevision,id);markChannel(id);refreshGuide()}
-    } }
-    private fun showEpisodes(requestRevision:Long,id:Long,season:Long,page:Int){ launchSafe {
-        val data=core.call("episodes","revision" to requestRevision,"id" to id,"season" to season,"offset" to page)
-        if(revision!=requestRevision)return@launchSafe
-        val rows=data.getJSONArray("items")
-        val dialog=AlertDialog.Builder(this@MainActivity).setTitle("Staffel $season")
-            .setItems(Array(rows.length()){rows.getJSONObject(it).getString("name")}){_,index->
-                val episodeId=rows.getJSONObject(index).getLong("id")
-                if(revision==requestRevision)selectChannel(episodeId)
+            if(rev!=revision||generation!=searchGeneration)return@launchSafe
+            if(status.text.toString()=="Episoden werden geladen …")status.text="${data.getInt("total")} Episoden verfügbar"
+            browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
+            openedSeries=id;seasonOffset=0;seriesSeasons=data.getJSONArray("seasons");seasonTotal=data.getInt("season_total")
+            val first=seriesSeasons.optJSONObject(0)
+            chosenSeason=if(first==null||first.isNull("season"))null else first.getLong("season")
+            unknownSeason=first?.isNull("season")==true
+            val summary="${data.getString("name")}\n$seasonTotal Staffeln · ${data.getInt("total")} Episoden"
+            seriesTitle.text=if(resources.configuration.fontScale>1.3f)data.getString("name") else summary
+            seriesTitle.maxLines=if(resources.configuration.fontScale>1.3f)2 else 3
+            seriesTitle.ellipsize=TextUtils.TruncateAt.END
+            seriesTitle.contentDescription=summary
+            artwork.bind(seriesPoster,"$rev:$id:true"){core.call("artwork","revision" to rev,"id" to id,"series" to true).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
+            updateSeasonLabel();updateLibraryLayout();firstChannelFocus=true
+            libraryFocusId=null;search();channels.scrollToPosition(0)
+        }
+    }
+    private fun updateSeasonLabel(){seasonButton.text=if(unknownSeason)"Ohne Staffelnummer ▾" else chosenSeason?.let{"Staffel $it ▾"}?:"Staffel wählen ▾"}
+    private fun chooseSeason(){
+        val id=openedSeries ?: return
+        fun showPage(){
+            val labels=Array(seriesSeasons.length()){i->val entry=seriesSeasons.getJSONObject(i)
+                "${if(entry.isNull("season"))"Ohne Staffelnummer" else "Staffel ${entry.getLong("season")}"} (${entry.getInt("count")})"}
+            val dialog=AlertDialog.Builder(this).setTitle("Staffel wählen").setItems(labels){_,index->
+                val entry=seriesSeasons.getJSONObject(index);unknownSeason=entry.isNull("season")
+                chosenSeason=if(unknownSeason)null else entry.getLong("season")
+                updateSeasonLabel();libraryFocusId=null;firstChannelFocus=true;search();channels.scrollToPosition(0)
             }.setNegativeButton("Schließen",null)
-        if(rows.length()==128)dialog.setPositiveButton("Weitere Episoden"){_,_->showEpisodes(requestRevision,id,season,page+128)}
-        if(page>0)dialog.setNeutralButton("Vorherige Episoden"){_,_->showEpisodes(requestRevision,id,season,(page-128).coerceAtLeast(0))}
-        dialog.show()
-    } }
+            if(seasonOffset+seriesSeasons.length()<seasonTotal)dialog.setPositiveButton("Weitere Staffeln"){_,_->loadSeasonPage(id,seasonOffset+128)}
+            if(seasonOffset>0)dialog.setNeutralButton("Vorherige Staffeln"){_,_->loadSeasonPage(id,(seasonOffset-128).coerceAtLeast(0))}
+            dialog.show()
+        }
+        showPage()
+    }
+    private fun loadSeasonPage(id:Long,start:Int){val rev=revision;launchSafe{
+        val data=core.call("series_page","revision" to rev,"id" to id,"offset" to 0,"season_offset" to start)
+        if(revision!=rev||openedSeries!=id)return@launchSafe
+        seasonOffset=start;seriesSeasons=data.getJSONArray("seasons");chooseSeason()
+    }}
+    private fun closeSeries(restore:Boolean,focus:Boolean){
+        seriesWork?.cancel()
+        if(openedSeries==null&&openedMovie==null){if(!restore)browseSnapshot=null;return}
+        val generation=++searchGeneration
+        openedSeries=null;openedMovie=null;chosenSeason=null;unknownSeason=false
+        val snapshot=browseSnapshot;browseSnapshot=null
+        updateLibraryLayout()
+        if(restore&&snapshot!=null){
+            offset=(snapshot.index/64)*64;total=snapshot.total;channelRows.replace(emptyList())
+            libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
+            resultCount.text=if(kind=="series")if(total==1)"1 Serie" else "$total Serien" else "$total Filme";channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
+            val rev=revision;val start=offset;val section=kind;val group=category;val text=query
+            launchSafe{
+                val data=fetchRows(rev,section,group,text,start,64)
+                if(revision!=rev||searchGeneration!=generation)return@launchSafe
+                val items=data.getJSONArray("items");total=data.getInt("total")
+                channelRows.replace(List(items.length()){Row.from(items.getJSONObject(it))})
+                if(focus)channels.post{returnToChannels()}
+            }
+        }
+    }
+    private fun navigatePlayback(direction:Int){
+        val id=selectedId ?: return
+        val context=playContext ?: return
+        val rev=revision
+        if(selectionWork?.isActive==true)return
+        launchSafe {
+            val next=core.call("adjacent","revision" to rev,"id" to id,"direction" to direction,
+                "kind" to context.kind,"category" to context.category,"query" to context.query,
+                "show" to context.show,"season" to context.season,"unknown" to context.unknown)
+            if(revision==rev&&selectedId==id&&!next.isNull("id"))selectChannel(next.getLong("id"),true)
+        }
+    }
+
     private fun playerAction(action: String) {
         when(action) {
             "play" -> launchSafe {
@@ -382,6 +568,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         if (::playback.isInitialized) playback.release()
+        artwork.close()
         scope.cancel()
         if (::loader.isInitialized) loader.close()
         if (::core.isInitialized) core.close()
@@ -418,6 +605,7 @@ class MainActivity : ComponentActivity() {
             val result = cached ?: loader.load(source, core)
             // Playlist replacement is explicit: stop the previous media and its watchdog together.
             playback.stop()
+            closeSeries(false,false);playContext=null
             revision = result.getLong("revision"); selectedId = null
             libraryFocusId=null; libraryFocusIndex=0; libraryFocusRevision=revision
             activeSource=source
@@ -439,8 +627,14 @@ class MainActivity : ComponentActivity() {
                 status.text="Gespeicherte Liste · Aktualisierung im Hintergrund …"
                 refreshWork=launchSafe {
                 // Build a new generation without disturbing playback or its current revision.
-                loader.load(source,core,activate=false)
-                if(activeSource===source&&selectedId==null&&!busy)importSource(source,false,true)
+                try {
+                    loader.load(source,core,activate=false)
+                    if(activeSource===source&&selectedId==null&&!busy)importSource(source,false,true)
+                } catch(error:Exception) {
+                    if(error is kotlinx.coroutines.CancellationException)throw error
+                    lastFailure=ImportErrors.describe(error,"refresh_cache").json()
+                    if(selectedId==null)status.text="Gespeicherte Liste verfügbar · Aktualisierung fehlgeschlagen. Quelle erneut laden."
+                }
                 }
             }
         } finally { busy = false; details.refreshButton.isEnabled=selectedId!=null }
@@ -456,12 +650,14 @@ class MainActivity : ComponentActivity() {
         for (i in 0 until kinds.length()) {
             val section = kinds.getJSONObject(i)
             val key = section.getString("id")
-            val title = when (key) { "live" -> "Live"; "movies" -> "Movies"; else -> "Series" }
+            val title = when (key) { "live" -> "Live"; "movies" -> "Movies"; "series" -> "Series"; else -> "Unzugeordnet" }
+            kindButtons[key]?.visibility=if(key=="unclassified"&&section.getInt("count")==0)View.GONE else View.VISIBLE
             kindButtons[key]?.text = "$title (${section.getInt("count")})"
         }
         switchKind(data.getString("preferred_kind"), false)
     }
     private fun switchKind(value: String, refresh: Boolean = true) {
+        closeSeries(false,false)
         kind = value; category = null; offset = 0; query = ""
         searchGeneration++
         searchWork?.cancel()
@@ -472,6 +668,7 @@ class MainActivity : ComponentActivity() {
         kindButtons.forEach { (key, tab) -> tab.isActivated = key == kind; tab.isSelected = key == kind }
         channelRows.replace(emptyList()); total = 0
         channels.scrollToPosition(0); categories.scrollToPosition(0)
+        updateLibraryLayout()
         renderCategories()
         if (refresh) search()
     }
@@ -495,11 +692,11 @@ class MainActivity : ComponentActivity() {
         val requestQuery = query
         val requestOffset = offset
         launchSafe {
-            val data = core.call("search", "revision" to requestRevision, "kind" to requestKind, "category" to requestCategory, "query" to requestQuery, "offset" to requestOffset, "limit" to 64)
+            val data = fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,64)
             if (generation != searchGeneration || revision != requestRevision) return@launchSafe
             total = data.getInt("total")
             val array = data.getJSONArray("items")
-            channelRows.replace(List(array.length()) { i -> val c = array.getJSONObject(i); Row(c.getLong("id"), c.getString("name")) })
+            channelRows.replace(List(array.length()) { i -> val c = array.getJSONObject(i); Row.from(c) })
             channelEmpty.visibility = if (total == 0) View.VISIBLE else View.GONE
             channelEmpty.text = if(requestQuery.isNotBlank()) "Keine Treffer für „$requestQuery“." else "Keine Einträge in dieser Auswahl."
             clearFiltersButton.visibility = if(total==0 && (requestQuery.isNotBlank() || requestCategory!=null || categorySearch.text.isNotBlank())) View.VISIBLE else View.GONE
@@ -512,7 +709,7 @@ class MainActivity : ComponentActivity() {
                     focusFirstChannel()
                 }
             }
-            resultCount.text = if(total==1) "1 Eintrag" else "$total Einträge"
+            resultCount.text = if(kind=="series"&&openedSeries==null)if(total==1)"1 Serie" else "$total Serien" else if(openedSeries!=null)if(total==1)"1 Episode" else "$total Episoden" else if(total==1) "1 Eintrag" else "$total Einträge"
         }
     }
     private fun loadNextPage(focusNew: Boolean = false, selectNew: Boolean = false) {
@@ -526,11 +723,11 @@ class MainActivity : ComponentActivity() {
         val requestKind=kind; val requestCategory=category; val requestQuery=query
         launchSafe {
             try {
-                val data=core.call("search","revision" to requestRevision,"kind" to requestKind,"category" to requestCategory,"query" to requestQuery,"offset" to start,"limit" to 64)
+                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,start,64)
                 if(generation!=searchGeneration || revision!=requestRevision) return@launchSafe
                 val array=data.getJSONArray("items")
                 var localStart=channelRows.itemCount
-                channelRows.append(List(array.length()) { i-> val c=array.getJSONObject(i); Row(c.getLong("id"),c.getString("name")) })
+                channelRows.append(List(array.length()) { i-> val c=array.getJSONObject(i); Row.from(c) })
                 if(channelRows.itemCount>512){
                     val drop=channelRows.itemCount-512
                     val layout=channels.layoutManager as LinearLayoutManager
@@ -561,12 +758,12 @@ class MainActivity : ComponentActivity() {
         val requestOffset=(offset-64).coerceAtLeast(0);val oldOffset=offset
         val requestKind=kind;val requestCategory=category;val requestQuery=query
         launchSafe{try{
-            val data=core.call("search","revision" to requestRevision,"kind" to requestKind,"category" to requestCategory,"query" to requestQuery,"offset" to requestOffset,"limit" to (oldOffset-requestOffset))
+            val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,(oldOffset-requestOffset))
             if(generation!=searchGeneration||revision!=requestRevision)return@launchSafe
             val array=data.getJSONArray("items")
             val layout=channels.layoutManager as LinearLayoutManager
             val first=layout.findFirstVisibleItemPosition();val top=layout.findViewByPosition(first)?.top?:0
-            channelRows.prepend(List(array.length()){i->val c=array.getJSONObject(i);Row(c.getLong("id"),c.getString("name"))})
+            channelRows.prepend(List(array.length()){i->val c=array.getJSONObject(i);Row.from(c)})
             offset=requestOffset
             if(channelRows.itemCount>512)channelRows.dropLast(channelRows.itemCount-512)
             layout.scrollToPositionWithOffset(first+array.length(),top)
@@ -581,6 +778,7 @@ class MainActivity : ComponentActivity() {
         val id = selectedId ?: return
         val result = core.call("epg", "revision" to revision, "id" to id, "now" to Instant.now().epochSecond)
         val rows = result.getJSONArray("programmes")
+        if(playContext?.kind!="live"){epg.text="";return}
         val formatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
         epg.text = if (rows.length() == 0) "Kein EPG für diesen Kanal" else (0 until rows.length()).joinToString("\n") {
             val p = rows.getJSONObject(it)
@@ -714,7 +912,7 @@ class MainActivity : ComponentActivity() {
         if(value && selectedId==null) return
         if(value==fullScreen) return
         playerPane.cancelSeek()
-        if(value) restoreFocus = currentFocus?.takeUnless { playerPane.hasFocus() || channels.hasFocus() }
+        if(value) restoreFocus = currentFocus?.takeUnless { playerPane.hasFocus() }
         fullScreen = value
         (playerPane.parent as ViewGroup).removeView(playerPane)
         if(value) {
@@ -734,6 +932,7 @@ class MainActivity : ComponentActivity() {
         playerPane.cancelSeek()
         if(fullScreen){setFullScreen(false);return}
         playerPane.hideControls()
+        if(openedMovie!=null){moviePlay.requestFocus();return}
         val wanted=libraryFocusId ?: selectedId
         val index=channelRows.rows.indexOfFirst { it.id==wanted }
         fun focusAt(position:Int) {
@@ -749,10 +948,10 @@ class MainActivity : ComponentActivity() {
             val targetOffset=(libraryFocusIndex.coerceIn(0,total-1)/64)*64
             val requestKind=kind;val requestCategory=category;val requestQuery=query
             launchSafe {
-                val data=core.call("search","revision" to requestRevision,"kind" to requestKind,"category" to requestCategory,"query" to requestQuery,"offset" to targetOffset,"limit" to 64)
+                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,targetOffset,64)
                 if(revision!=requestRevision || searchGeneration!=generation)return@launchSafe
                 val array=data.getJSONArray("items")
-                offset=targetOffset;channelRows.replace(List(array.length()){i->val c=array.getJSONObject(i);Row(c.getLong("id"),c.getString("name"))})
+                offset=targetOffset;channelRows.replace(List(array.length()){i->val c=array.getJSONObject(i);Row.from(c)})
                 val restored=channelRows.rows.indexOfFirst { it.id==wanted }
                 if(restored>=0)focusAt(restored) else channelSearch.requestFocus()
             }
@@ -768,7 +967,8 @@ class MainActivity : ComponentActivity() {
         playerPane.cancelSeek()
         if(playerPane.controlsVisible && playerPane.hasFocus()) playerPane.hideControls()
         else if(fullScreen) setFullScreen(false)
-        else if(playerPane.hasFocus())returnToChannels() else finish()
+        else if(playerPane.hasFocus())returnToChannels()
+        else if(openedSeries!=null||openedMovie!=null)closeSeries(true,true) else finish()
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (::playback.isInitialized && event.action == KeyEvent.ACTION_DOWN && currentFocus !is EditText) {
@@ -783,10 +983,7 @@ class MainActivity : ComponentActivity() {
                     if(event.repeatCount>0)return true
                     playerPane.cancelSeek()
                     val direction = if (event.keyCode == KeyEvent.KEYCODE_CHANNEL_UP) 1 else -1
-                    val index = channelRows.rows.indexOfFirst { it.id == selectedId }
-                    if(direction==1 && index==channelRows.itemCount-1 && offset+channelRows.itemCount<total) { loadNextPage(selectNew=true); return true }
-                    if(direction == -1 && index==0&&offset>0){loadPreviousPage(selectNew=true);return true}
-                    channelRows.rows.getOrNull((index + direction + channelRows.rows.size).let { if (channelRows.rows.isEmpty()) 0 else it % channelRows.rows.size })?.let { row -> launchSafe { playback.select(revision, row.id); markChannel(row.id); refreshGuide() } }
+                    navigatePlayback(direction)
                     return true
                 }
             }
@@ -823,68 +1020,92 @@ class MainActivity : ComponentActivity() {
     private fun label(value: String, size: Float) = TvUi.text(this,value,size)
     private fun button(value: String, click: () -> Unit) = TvUi.button(this,value,click)
     private fun list(adapter: Rows) = RecyclerView(this).apply { id = View.generateViewId(); layoutManager = LinearLayoutManager(this@MainActivity); this.adapter = adapter; setHasFixedSize(true); itemAnimator = null; clipToPadding=false; setPadding(dp(2),dp(2),dp(2),dp(2)) }
-    private data class Row(val id: Long, val title: String)
+    private data class Row(val id:Long,val title:String,val series:Boolean=false,val year:String="",val quality:String="",val episode:String="") {
+        companion object {fun from(c:JSONObject)=Row(c.getLong("id"),c.getString("name"),c.optString("item_type")=="series",
+            if(c.isNull("year"))"" else c.optString("year"),if(c.isNull("quality"))"" else c.optString("quality"),
+            if(c.isNull("episode"))"" else "E"+c.optString("episode").padStart(2,'0'))}
+    }
     private data class CategoryItem(val id: Long, val name: String, val kind: String, val count: Int)
-    private inner class Rows(private val channelList: Boolean = false, val select: (Row) -> Unit) : RecyclerView.Adapter<Rows.Holder>() {
-        init { setHasStableIds(true) }
-        val rows = ArrayList<Row>()
-        inner class Holder(val text: TextView) : RecyclerView.ViewHolder(text)
-        private fun updateTextMotion(text:TextView,focused:Boolean) {
-            val animate=TvUi.animationsEnabled(this@MainActivity)
-            text.isSingleLine=animate || !focused
-            text.maxLines=if(!animate && focused)Int.MAX_VALUE else 1
-            text.ellipsize=if(animate)TextUtils.TruncateAt.MARQUEE else if(focused)null else TextUtils.TruncateAt.END
-            text.isSelected=focused && animate
-        }
-        override fun getItemId(position: Int)=rows[position].id
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(label("",13f).apply {
-            isClickable = true; isSingleLine=true; ellipsize=TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit=-1
-            setPadding(dp(9),dp(5),dp(9),dp(5));minHeight=dp(36)
-            TvUi.focus(this,1.015f) { focused -> isSelected=focused }
-            layoutParams = RecyclerView.LayoutParams(-1, -2).apply { bottomMargin = dp(2) }
-            accessibilityDelegate=object:View.AccessibilityDelegate(){
-                override fun onInitializeAccessibilityNodeInfo(host:View,info:AccessibilityNodeInfo){
-                    super.onInitializeAccessibilityNodeInfo(host,info)
+    private inner class Rows(private val channelList:Boolean=false,val select:(Row)->Unit):RecyclerView.Adapter<Rows.Holder>() {
+        init{setHasStableIds(true)}
+        val rows=ArrayList<Row>()
+        inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean):RecyclerView.ViewHolder(root)
+        override fun getItemId(position:Int)=rows[position].id
+        override fun getItemViewType(position:Int)=if(channelList&&gridMode)1 else 0
+        override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder{
+            val card=viewType==1
+            val root=LinearLayout(this@MainActivity).apply{
+                id=View.generateViewId();orientation=if(card)LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                isClickable=true;descendantFocusability=ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                setPadding(dp(6),dp(5),dp(6),dp(5));minimumHeight=dp(36);TvUi.focus(this)
+                layoutParams=RecyclerView.LayoutParams(-1,-2).apply{bottomMargin=dp(if(card)8 else 2);marginEnd=dp(if(card)6 else 0)}
+                accessibilityDelegate=object:View.AccessibilityDelegate(){override fun onInitializeAccessibilityNodeInfo(host:View,info:AccessibilityNodeInfo){
+                    super.onInitializeAccessibilityNodeInfo(host,info);info.className=Button::class.java.name
                     info.isSelected=host.isActivated
-                    if(android.os.Build.VERSION.SDK_INT>=30 && host.isActivated) info.stateDescription=if(channelList)"Wird wiedergegeben" else "Ausgewählte Kategorie"
-                }
+                    if(android.os.Build.VERSION.SDK_INT>=30&&host.isActivated)info.stateDescription=if(channelList)"Wird wiedergegeben" else "Ausgewählte Kategorie"
+                }}
             }
-        })
-        override fun getItemCount() = rows.size
-        override fun onBindViewHolder(holder: Holder, position: Int) {
-            val row = rows[position]
-            val active = if (channelList) row.id == selectedId && ::playback.isInitialized && playback.player!=null else row.id == (category ?: -1L)
-            holder.text.isActivated = active
-            TvUi.focus(holder.text,1f) { focused ->
-                updateTextMotion(holder.text,focused)
-                if(focused && channelList && holder.bindingAdapterPosition>=0){
-                    libraryFocusId=row.id;libraryFocusIndex=offset+holder.bindingAdapterPosition;libraryFocusRevision=revision
-                }
+            val image=if(channelList)(if(card)PosterImageView(this@MainActivity) else ImageView(this@MainActivity)).apply{
+                scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                setBackgroundColor(TvUi.background)
+                root.addView(this,LinearLayout.LayoutParams(if(card)-1 else dp(28),dp(if(card)132 else 28)).apply{if(!card)marginEnd=dp(7)})
+            }else null
+            val text=label("",if(card)12f else 13f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
+            root.addView(text,LinearLayout.LayoutParams(if(card)-1 else 0,-2,if(card)0f else 1f))
+            val metadata=if(card)label("",10f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
+            return Holder(root,text,image,metadata,card)
+        }
+        override fun getItemCount()=rows.size
+        override fun onBindViewHolder(holder:Holder,position:Int){
+            val row=rows[position]
+            val active=if(channelList)!row.series&&row.id==selectedId&&::playback.isInitialized&&playback.player!=null else row.id==(category?:-1L)
+            holder.root.isActivated=active
+            holder.text.text="${if(active)if(channelList)"▶ " else "✓ " else ""}${if(row.episode.isNotEmpty())row.episode+" · " else ""}${row.title}"
+            holder.metadata?.text=if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
+            holder.root.contentDescription=row.title
+            TvUi.focus(holder.root){focused->
+                holder.text.maxLines=if(focused)4 else 2
+                if(focused&&channelList&&holder.bindingAdapterPosition>=0){libraryFocusId=row.id;libraryFocusIndex=offset+holder.bindingAdapterPosition;libraryFocusRevision=revision}
             }
-            updateTextMotion(holder.text,holder.text.hasFocus())
-            holder.text.text = if (active) "▶ ${row.title}" else row.title
-            holder.text.contentDescription = row.title
-            holder.text.setOnClickListener { select(row) }
-            holder.text.setOnKeyListener { _,key,event ->
+            holder.root.setOnClickListener{select(row)}
+            holder.root.setOnLongClickListener{showRowTitle(row);true}
+            holder.image?.let{view->
+                val rev=revision;val id=row.id;val series=row.series
+                artwork.bind(view,"$rev:$id:$series"){core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
+            }
+            holder.root.setOnKeyListener{_,key,event->
                 if(key in setOf(KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER)){
-                    if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0)select(row)
+                    if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0)select(row)
                     return@setOnKeyListener true
                 }
-                if(channelList && key==KeyEvent.KEYCODE_DPAD_RIGHT){
-                    if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                        libraryFocusId=row.id;libraryFocusIndex=offset+holder.bindingAdapterPosition;libraryFocusRevision=revision
-                        playerPane.hideControls();video.requestFocus()
-                    };return@setOnKeyListener true
+                if(key==KeyEvent.KEYCODE_INFO&&event.action==KeyEvent.ACTION_DOWN){showRowTitle(row);return@setOnKeyListener true}
+                val index=holder.bindingAdapterPosition
+                if(index<0)return@setOnKeyListener false
+                val columns=(channels.layoutManager as? GridLayoutManager)?.spanCount?:1
+                if(channelList&&key==KeyEvent.KEYCODE_DPAD_RIGHT&&(!holder.card||index%columns==columns-1||index==itemCount-1)){
+                    if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0&&mediaColumn.visibility==View.VISIBLE){playerPane.hideControls();video.requestFocus()}
+                    return@setOnKeyListener mediaColumn.visibility==View.VISIBLE
                 }
-                if(channelList && key==KeyEvent.KEYCODE_DPAD_UP && event.action==KeyEvent.ACTION_DOWN && holder.bindingAdapterPosition==0 && offset>0){loadPreviousPage(focusNew=true);return@setOnKeyListener true}
-                if(channelList && key==KeyEvent.KEYCODE_DPAD_DOWN && event.action==KeyEvent.ACTION_DOWN && holder.bindingAdapterPosition==itemCount-1 && offset+itemCount<total) { loadNextPage(focusNew=true); true } else false
+                if(channelList&&key==KeyEvent.KEYCODE_DPAD_UP&&event.action==KeyEvent.ACTION_DOWN&&index<columns&&offset>0){loadPreviousPage(focusNew=true);return@setOnKeyListener true}
+                if(channelList&&key==KeyEvent.KEYCODE_DPAD_DOWN&&event.action==KeyEvent.ACTION_DOWN&&index>=itemCount-columns&&offset+itemCount<total){loadNextPage(focusNew=true);return@setOnKeyListener true}
+                false
             }
         }
-        fun replace(value: List<Row>) { rows.clear();rows.addAll(value);notifyDataSetChanged() }
-        fun append(value: List<Row>) { val start=rows.size;rows.addAll(value);notifyItemRangeInserted(start,value.size) }
+        override fun onViewRecycled(holder:Holder){holder.image?.apply{tag=null;setImageDrawable(null)};super.onViewRecycled(holder)}
+        fun replace(value:List<Row>){rows.clear();rows.addAll(value);notifyDataSetChanged()}
+        fun append(value:List<Row>){val start=rows.size;rows.addAll(value);notifyItemRangeInserted(start,value.size)}
         fun prepend(value:List<Row>){rows.addAll(0,value);notifyItemRangeInserted(0,value.size)}
         fun dropFirst(count:Int){rows.subList(0,count).clear();notifyItemRangeRemoved(0,count)}
         fun dropLast(count:Int){val start=rows.size-count;rows.subList(start,rows.size).clear();notifyItemRangeRemoved(start,count)}
     }
+    private fun showRowTitle(row:Row){AlertDialog.Builder(this).setTitle(if(row.series)"Serie" else "Titel").setMessage(listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")).setPositiveButton("Schließen",null).show()}
+
 }
 
+/** Determine the poster ratio during measurement, including the first grid layout. */
+private class PosterImageView(context:android.content.Context):ImageView(context){
+    override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
+        val width=View.MeasureSpec.getSize(widthMeasureSpec)
+        super.onMeasure(widthMeasureSpec,View.MeasureSpec.makeMeasureSpec((width*1.5f).toInt(),View.MeasureSpec.EXACTLY))
+    }
+}

@@ -74,6 +74,12 @@ try {
     do { $ui = Get-Ui; $imported = $ui.SelectNodes('//node') | Where-Object text -eq 'Release Fixture' } while (!$imported -and [DateTime]::UtcNow -lt $deadline)
     if (!$imported) { throw 'Release JNI import did not finish' }
     & adb -s $Serial shell input keyevent KEYCODE_DPAD_CENTER
+    # The synthetic positive-duration entry is a movie and opens details before playback.
+    $ui = Get-Ui
+    $play = $ui.SelectNodes('//node') | Where-Object text -eq 'Abspielen' | Select-Object -First 1
+    if (!$play -or $play.focused -ne 'true') { throw 'Release movie details did not focus the play action' }
+    if ($ui.SelectNodes('//node') | Where-Object text -eq 'Wiedergabe · Release Fixture') { throw 'Opening movie details started playback unexpectedly' }
+    & adb -s $Serial shell input keyevent KEYCODE_DPAD_CENTER
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         $ui = Get-Ui
@@ -82,7 +88,15 @@ try {
     if (!$playing) { throw 'Release playback did not start' }
     & adb -s $Serial shell screencap -p /sdcard/Download/iptv-release.png
     & adb -s $Serial pull /sdcard/Download/iptv-release.png "$tvRoot/artifacts/tv-release.png"
-    Write-Host 'R8 release: launch, JNI import, D-pad and real Media3 playback passed.'
+    & adb -s $Serial shell input keyevent KEYCODE_DPAD_CENTER
+    $ui = Get-Ui
+    if ($ui.SelectNodes('//node') | Where-Object 'content-desc' -eq 'Einstellungen') { throw 'Release movie did not enter fullscreen' }
+    & adb -s $Serial shell screencap -p /sdcard/Download/iptv-release-fullscreen.png
+    & adb -s $Serial pull /sdcard/Download/iptv-release-fullscreen.png "$tvRoot/artifacts/tv-release-fullscreen.png"
+    Write-Host 'R8 release: launch, JNI import, movie details, explicit play, fullscreen and real Media3 playback passed.'
+    $releaseVersion=[regex]::Match((Get-Content -Raw "$tvRoot/app/build.gradle.kts"),'versionName\s*=\s*"([0-9.]+)"').Groups[1].Value
+    if(!$releaseVersion){throw 'Release version missing'}
+    Copy-Item -LiteralPath $signed -Destination "$tvRoot/artifacts/RUSTREAM-IPTV-$releaseVersion.apk" -Force
 } finally {
     & adb -s $Serial shell am force-stop de.iptv.tv
     & adb -s $Serial reverse --remove tcp:18888

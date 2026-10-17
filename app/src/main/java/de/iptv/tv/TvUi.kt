@@ -49,6 +49,7 @@ object TvUi {
     }
     fun text(context: Context, value: String, size: Float = 14f, color: Int = Color.WHITE) = TextView(context).apply {
         text = value; textSize = size; setTextColor(color); gravity = Gravity.CENTER_VERTICAL
+        textDirection = View.TEXT_DIRECTION_FIRST_STRONG
         includeFontPadding = false
     }
     fun focus(view: View, scale: Float = 1.035f, changed: ((Boolean) -> Unit)? = null) {

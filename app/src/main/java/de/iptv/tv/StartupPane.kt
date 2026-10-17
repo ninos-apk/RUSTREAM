@@ -10,11 +10,12 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.ImageView
 
 /** App-owned loading screen; slow network operations never hold Android's system splash. */
 class StartupPane(context: Context, private val retry: () -> Unit, private val sources: () -> Unit) : FrameLayout(context) {
-    private val brand = TvUi.text(context, "IPTV", 48f).apply {
-        gravity = Gravity.CENTER; letterSpacing = .14f; setTypeface(typeface, Typeface.BOLD)
+    private val brand = TvUi.text(context, context.getString(R.string.app_name), 28f).apply {
+        gravity = Gravity.CENTER; letterSpacing = .06f; setTypeface(typeface, Typeface.BOLD)
     }
     private val heading = TvUi.text(context, "Dein Programm wird vorbereitet", 22f).apply { gravity = Gravity.CENTER }
     private val message = TvUi.text(context, "Gespeicherte Quelle wird geladen …", 16f, TvUi.muted).apply {
@@ -37,6 +38,10 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             setPadding(TvUi.dp(context, 32), TvUi.dp(context, 30), TvUi.dp(context, 32), TvUi.dp(context, 30))
         }
+        content.addView(ImageView(context).apply {
+            setImageResource(R.drawable.rustream_logo);scaleType=ImageView.ScaleType.FIT_CENTER
+            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },LinearLayout.LayoutParams(-1,TvUi.dp(context,if(resources.configuration.fontScale>1.3f)72 else 112)).apply{bottomMargin=TvUi.dp(context,12)})
         content.addView(brand, LinearLayout.LayoutParams(-1, -2))
         content.addView(TvUi.text(context, "LIVE  /  MOVIES  /  SERIES", 11f, TvUi.accent).apply { gravity = Gravity.CENTER; letterSpacing = .12f }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = TvUi.dp(context, 24) })
         content.addView(heading, LinearLayout.LayoutParams(-1, -2))

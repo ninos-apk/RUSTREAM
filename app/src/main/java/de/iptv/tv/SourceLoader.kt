@@ -55,7 +55,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
     }
     suspend fun shouldRefresh(source: JSONObject): Boolean = withContext(Dispatchers.IO) { catalogs.entry(source)?.let {
         val changed=source.optString("kind")=="file"&&fileSignature(source).let{current->current.length()>0&&current.toString()!=(it.optJSONObject("validators")?:JSONObject()).toString()}
-        changed||System.currentTimeMillis()-it.optLong("updated") > if(it.optBoolean("partial")) 60_000L else 15*60_000L
+        it.optInt("schema")<CatalogStore.SCHEMA||changed||System.currentTimeMillis()-it.optLong("updated") > if(it.optBoolean("partial")) 60_000L else 15*60_000L
     } ?: true }
     suspend fun remove(source: JSONObject) = withContext(Dispatchers.IO) { catalogs.remove(source) }
 
@@ -86,7 +86,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 "url" -> {
                     stage = "download"; progress("Playlist wird heruntergeladen …")
                     val before=elapsed()
-                    val downloaded=fetch(source.getString("url"),temporary,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,previous?.optJSONObject("validators"))
+                    val downloaded=fetch(source.getString("url"),temporary,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,previous?.takeIf{it.optInt("schema")==CatalogStore.SCHEMA}?.optJSONObject("validators"))
                     if(downloaded.optBoolean("not_modified")) {
                         val restored=if(activate)restore(source,core) ?: throw ImportFailure("catalog_invalid","restore") else JSONObject().put("unchanged",true)
                         report.put("not_modified",true).put("total_ms",elapsed())
@@ -152,12 +152,12 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                     "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream")) }
                 report.put("parse_ms",parsed.getDouble("import_ms"))
                 stage="commit_catalog";progress("Katalog wird geöffnet …")
+                check(parsed.getInt("schema")==CatalogStore.SCHEMA){"catalog_incompatible"}
+                Core().use { checkCore -> checkCore.call("open_catalog","path" to file.absolutePath,"key" to key) }
+                catalogs.commit(source,file,key,validators,warnings.length()>0,warnings,parsed.getInt("schema"))
+                target=null
                 result=if(activate)core.call("open_catalog","path" to file.absolutePath,"key" to key)
                     .put("import_ms",parsed.getDouble("import_ms")) else parsed
-                if(activate)target=null
-                try { catalogs.commit(source,file,key,validators,warnings.length()>0,warnings) }
-                catch(error:Exception){if(!activate)throw error;warnings.put(JSONObject().put("section","cache").put("error",ImportErrors.describe(error,"save_cache").json()))}
-                target=null
             }
             report.put("total_ms",elapsed()).put("count",result.optInt("count")).put("skipped",result.optInt("skipped"))
                 .put("activated",activate)

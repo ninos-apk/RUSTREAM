@@ -107,19 +107,19 @@ fn scales_to_large_lists_without_losing_entries() {
 
 #[test]
 fn content_detection_uses_metadata_routes_groups_and_episode_names_in_order() {
-    use ContentKind::{LiveTv, Movie, Series};
+    use ContentKind::{LiveTv, Movie, Series, Unclassified};
     for (metadata, title, address, expected) in [
         (
             "content-type=series",
             "Episode",
             "https://example.test/movie/u/p/1.mp4",
-            Series,
+            Movie,
         ),
         (
             "tvg-type=movie",
             "Title S01E02",
             "https://example.test/series/1.mkv",
-            Movie,
+            Series,
         ),
         (
             "stream-type=live",
@@ -199,7 +199,7 @@ fn content_detection_uses_metadata_routes_groups_and_episode_names_in_order() {
             "group-title=Drama",
             "Film",
             "https://example.test/1.MP4?token=test",
-            Movie,
+            Unclassified,
         ),
         (
             "group-title=Sports",
@@ -213,13 +213,18 @@ fn content_detection_uses_metadata_routes_groups_and_episode_names_in_order() {
             "https://example.test/1.ts",
             LiveTv,
         ),
-        ("", "Resolution 1920x1080", "https://example.test/1", LiveTv),
-        ("", "AS01E01B", "https://example.test/1", LiveTv),
+        (
+            "",
+            "Resolution 1920x1080",
+            "https://example.test/1",
+            Unclassified,
+        ),
+        ("", "AS01E01B", "https://example.test/1", Unclassified),
         (
             "",
             "Station",
             "https://example.test/path/movie/password/1.ts",
-            LiveTv,
+            Movie,
         ),
     ] {
         let input = format!("#EXTINF:-1 {metadata},{title}\n{address}\n");

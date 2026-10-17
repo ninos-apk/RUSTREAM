@@ -48,12 +48,12 @@ fn run() -> Result<(), String> {
         }
         let categories = call(&mut engine, json!({"op":"categories"}))?;
         let mut searches = Vec::new();
-        for kind in ["live", "movies", "series"] {
+        for kind in ["live", "movies", "series", "unclassified"] {
             for query in ["", "hd", "not-a-real-channel-982361"] {
                 let now = Instant::now();
                 let page = call(
                     &mut engine,
-                    json!({"op":"search","revision":revision,"kind":kind,"query":query,"offset":0,"limit":64}),
+                    json!({"op":"browse","revision":revision,"kind":kind,"query":query,"offset":0,"limit":64}),
                 )?;
                 searches.push(json!({"kind":kind,"query":query,"ms":now.elapsed().as_secs_f64()*1000.0,"total":page["total"]}));
             }
@@ -78,6 +78,15 @@ fn run() -> Result<(), String> {
                     && expected.logo == actual.logo
                     && expected.headers == actual.headers
                     && expected.is_live == actual.is_live
+                    && expected.display_name == actual.display_name
+                    && expected.tvg_name == actual.tvg_name
+                    && expected.group_title == actual.group_title
+                    && expected.attributes == actual.attributes
+                    && expected.url_path == actual.url_path
+                    && expected.extension == actual.extension
+                    && expected.year == actual.year
+                    && expected.quality == actual.quality
+                    && expected.episode == actual.episode
                     && groups[actual.category]["name"] == group;
                 if !matches {
                     return Err(std::io::Error::other("field_parity_failed"));
@@ -87,7 +96,17 @@ fn run() -> Result<(), String> {
             },
         )
         .map_err(|_| "field_parity_failed")?;
-        let report = json!({"count":built["count"],"skipped":built["skipped"],"build_ms":build_ms,"database_bytes":bytes,"open_ms":restores,"kinds":categories["kinds"],"categories":groups.len(),"all_channel_fields_verified":index,"searches":searches});
+        let db_check =
+            rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|_| "verification_open_failed")?;
+        let uncovered:usize=db_check.query_row("SELECT count(*) FROM channels c LEFT JOIN members m ON m.channel=c.id WHERE c.kind=2 AND c.series_id IS NULL AND c.parent IS NULL AND m.channel IS NULL",[],|r|r.get(0)).map_err(|_|"coverage_query_failed")?;
+        if uncovered != 0 {
+            return Err("series_coverage_failed".into());
+        }
+        let memberships: usize = db_check
+            .query_row("SELECT count(*) FROM members", [], |r| r.get(0))
+            .map_err(|_| "coverage_query_failed")?;
+        let report = json!({"count":built["count"],"skipped":built["skipped"],"build_ms":build_ms,"database_bytes":bytes,"open_ms":restores,"kinds":categories["kinds"],"categories":groups.len(),"all_channel_fields_verified":index,"series_memberships":memberships,"uncovered_series_episodes":uncovered,"searches":searches});
         fs::write(
             output,
             serde_json::to_vec_pretty(&report).map_err(|_| "encode_failed")?,

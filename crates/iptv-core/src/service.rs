@@ -48,6 +48,43 @@ pub enum Request {
         season: Option<i64>,
         offset: usize,
     },
+    Browse {
+        revision: u64,
+        kind: Option<String>,
+        category: Option<usize>,
+        query: String,
+        offset: usize,
+        limit: usize,
+    },
+    SeriesPage {
+        revision: u64,
+        id: usize,
+        season: Option<i64>,
+        #[serde(default)]
+        unknown: bool,
+        offset: usize,
+        #[serde(default)]
+        season_offset: usize,
+    },
+    Artwork {
+        revision: u64,
+        id: usize,
+        #[serde(default)]
+        series: bool,
+    },
+    Adjacent {
+        revision: u64,
+        id: usize,
+        direction: i64,
+        kind: Option<String>,
+        category: Option<usize>,
+        #[serde(default)]
+        query: String,
+        show: Option<usize>,
+        season: Option<i64>,
+        #[serde(default)]
+        unknown: bool,
+    },
     Info,
     Import {
         path: String,
@@ -133,6 +170,7 @@ fn kind_key(kind: ContentKind) -> &'static str {
         ContentKind::LiveTv => "live",
         ContentKind::Movie => "movies",
         ContentKind::Series => "series",
+        ContentKind::Unclassified => "unclassified",
     }
 }
 fn parse_kind(kind: &str) -> Result<ContentKind, String> {
@@ -140,6 +178,7 @@ fn parse_kind(kind: &str) -> Result<ContentKind, String> {
         "live" => Ok(ContentKind::LiveTv),
         "movies" => Ok(ContentKind::Movie),
         "series" => Ok(ContentKind::Series),
+        "unclassified" => Ok(ContentKind::Unclassified),
         _ => Err("invalid_kind".into()),
     }
 }
@@ -184,7 +223,7 @@ impl Engine {
                 Ok(json!({"revision":self.revision}))
             }
             Request::Info => Ok(
-                json!({"core_version":"0.3.0","catalog_schema":1,"catalog_bytes":crate::catalog::BYTE_LIMIT,"catalog_entries":crate::catalog::ENTRY_LIMIT}),
+                json!({"core_version":"0.4.0","catalog_schema":crate::catalog::SCHEMA,"catalog_bytes":crate::catalog::BYTE_LIMIT,"catalog_entries":crate::catalog::ENTRY_LIMIT}),
             ),
             Request::BuildCatalog {
                 path,
@@ -212,7 +251,7 @@ impl Engine {
                     };
                     let catalog = writer.finish(summary.skipped)?;
                     Ok(
-                        json!({"count":catalog.count,"skipped":catalog.skipped,"import_ms":started.elapsed().as_secs_f64()*1000.0}),
+                        json!({"schema":catalog.schema,"count":catalog.count,"skipped":catalog.skipped,"import_ms":started.elapsed().as_secs_f64()*1000.0}),
                     )
                 })();
                 if result.is_err() {
@@ -223,11 +262,100 @@ impl Engine {
             }
             Request::OpenCatalog { path, key } => {
                 let catalog = crate::catalog::Catalog::open(&path, &key)?;
-                let result = json!({"revision":self.revision+1,"count":catalog.count,"skipped":catalog.skipped});
+                let result = json!({"schema":catalog.schema,"revision":self.revision+1,"count":catalog.count,"skipped":catalog.skipped});
                 self.catalog = Some(catalog);
                 self.playlist = Playlist::default();
                 self.reset_library();
                 Ok(result)
+            }
+            Request::Browse {
+                revision,
+                kind,
+                category,
+                query,
+                offset,
+                limit,
+            } => {
+                self.check_revision(revision)?;
+                if query.len() > 1024 {
+                    return Err("query_too_large".into());
+                }
+                if let Some(catalog) = &self.catalog {
+                    catalog.browse(
+                        revision,
+                        kind.as_deref().map(parse_kind).transpose()?,
+                        category,
+                        &query,
+                        offset,
+                        limit,
+                    )
+                } else {
+                    self.memory_browse(
+                        revision,
+                        kind.as_deref().map(parse_kind).transpose()?,
+                        category,
+                        &query,
+                        offset,
+                        limit,
+                    )
+                }
+            }
+            Request::SeriesPage {
+                revision,
+                id,
+                season,
+                unknown,
+                offset,
+                season_offset,
+            } => {
+                self.check_revision(revision)?;
+                let mut data = if let Some(c) = &self.catalog {
+                    c.series_page(id, season, unknown, offset, season_offset)?
+                } else {
+                    self.memory_series_page(id, season, unknown, offset, season_offset)?
+                };
+                data["revision"] = json!(revision);
+                Ok(data)
+            }
+            Request::Artwork {
+                revision,
+                id,
+                series,
+            } => {
+                self.check_revision(revision)?;
+                let mut data = if let Some(catalog) = &self.catalog {
+                    catalog.artwork(id, series)?
+                } else {
+                    json!({"url":self.channel(id)?.logo})
+                };
+                data["revision"] = json!(revision);
+                Ok(data)
+            }
+            Request::Adjacent {
+                revision,
+                id,
+                direction,
+                kind,
+                category,
+                query,
+                show,
+                season,
+                unknown,
+            } => {
+                self.check_revision(revision)?;
+                if query.len() > 1024 {
+                    return Err("query_too_large".into());
+                }
+                self.catalog.as_ref().ok_or("catalog_required")?.adjacent(
+                    id,
+                    direction,
+                    kind.as_deref().map(parse_kind).transpose()?,
+                    category,
+                    &query,
+                    show,
+                    season,
+                    unknown,
+                )
             }
             Request::Entry { revision, id } => {
                 self.check_revision(revision)?;
@@ -322,7 +450,7 @@ impl Engine {
                     Ok(
                         json!({"revision": self.revision, "count": self.playlist.channels.len(), "import_ms":self.import_ms,
                     "preferred_kind":kind_key(self.playlist.preferred_kind()),
-                    "kinds":ContentKind::ALL.map(|kind| json!({"id":kind_key(kind),"name":kind.label(),"count":self.playlist.count(kind)})),
+                    "kinds":ContentKind::ALL.map(|kind| json!({"id":kind_key(kind),"name":kind.label(),"count":self.playlist.library_count(kind)})),
                     "categories": self.playlist.categories.iter().enumerate().map(|(id,c)| json!({"id": id, "name": c.name, "kind":kind_key(c.kind), "count": c.channels.len()})).collect::<Vec<_>>()}),
                     )
                 }
@@ -484,6 +612,76 @@ impl Engine {
             }
         }
     }
+    fn memory_browse(
+        &self,
+        revision: u64,
+        kind: Option<ContentKind>,
+        category: Option<usize>,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Value, String> {
+        if category.is_some_and(|id| id >= self.playlist.categories.len()) {
+            return Err("invalid_category".into());
+        }
+        let rows = filter_content(&self.playlist, kind, category, query);
+        let mut seen = std::collections::HashSet::new();
+        let rows = rows
+            .into_iter()
+            .filter(|id| {
+                self.playlist.channels[*id]
+                    .series_index
+                    .is_none_or(|s| seen.insert(s))
+            })
+            .collect::<Vec<_>>();
+        let items=rows.iter().skip(offset).take(limit.clamp(1,128)).map(|id|{
+            let c=&self.playlist.channels[*id];
+            if let Some(s)=c.series_index.and_then(|i|self.playlist.series.get(i)){
+                let representative=s.seasons.iter().flat_map(|s|s.episodes.iter()).min().copied().unwrap_or(*id);
+                json!({"id":representative,"name":s.title,"item_type":"series","kind":"series","live":false})
+            }else{json!({"id":id,"name":c.name,"item_type":"entry","kind":kind_key(c.kind),"live":c.is_live,"year":c.year,"quality":c.quality})}
+        }).collect::<Vec<_>>();
+        Ok(json!({"revision":revision,"total":rows.len(),"items":items}))
+    }
+    fn memory_series_page(
+        &self,
+        id: usize,
+        season: Option<i64>,
+        unknown: bool,
+        offset: usize,
+        season_offset: usize,
+    ) -> Result<Value, String> {
+        let show = self
+            .playlist
+            .channels
+            .get(id)
+            .and_then(|c| c.series_index)
+            .and_then(|i| self.playlist.series.get(i))
+            .ok_or("not_a_series")?;
+        let ids = show
+            .seasons
+            .iter()
+            .filter(|s| {
+                if unknown {
+                    s.number.is_none()
+                } else {
+                    season.is_none_or(|n| Some(n) == s.number.map(i64::from))
+                }
+            })
+            .flat_map(|s| s.episodes.iter())
+            .collect::<Vec<_>>();
+        let items=ids.iter().skip(offset).take(128).map(|id|{let c=&self.playlist.channels[**id];json!({"id":id,"name":c.name,"season":c.episode.as_ref().map(|e|e.season),"episode":c.episode.as_ref().map(|e|e.episode),"item_type":"entry"})}).collect::<Vec<_>>();
+        let seasons = show
+            .seasons
+            .iter()
+            .skip(season_offset)
+            .take(128)
+            .map(|s| json!({"season":s.number,"count":s.episodes.len()}))
+            .collect::<Vec<_>>();
+        Ok(
+            json!({"name":show.title,"series_id":null,"total":ids.len(),"items":items,"seasons":seasons,"season_total":show.seasons.len()}),
+        )
+    }
     fn check_revision(&self, revision: u64) -> Result<(), String> {
         if revision == self.revision {
             Ok(())
@@ -498,13 +696,14 @@ impl Engine {
             Ok(self.status_at(now))
         }
     }
-    fn replace(&mut self, playlist: Playlist) -> Result<Value, String> {
+    fn replace(&mut self, mut playlist: Playlist) -> Result<Value, String> {
         if playlist.channels.is_empty() {
             return Err("empty_playlist".into());
         }
         if playlist.channels.len() > CHANNEL_LIMIT {
             return Err("too_many_channels".into());
         }
+        playlist.build_series();
         self.playlist = playlist;
         self.catalog = None;
         self.reset_library();

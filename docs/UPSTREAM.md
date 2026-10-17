@@ -1,5 +1,9 @@
 # Herkunft und Wiederverwendung
 
+## Inhaltsbibliothek 0.4.0 – 17. Oktober 2026
+
+Die Parserregeln und Metadaten aus Windows-Commit `17dd21f41fd8a802df236ef1ce9d2c1087fb034e` wurden in die Android-Ableitung übertragen. `parse_stream`, Formatprüfung und Speichergrenzen bleiben erhalten; die produktive Seriengruppierung liegt in SQLite. Der ältere In-Memory-Pfad besitzt denselben Serienindex wie Windows. Fünf Inhaltsbibliothekstests sind bis auf den Crate-Namen übernommen. `upstream-sha256.json` dokumentiert lokalen Ableitungs- und Windows-Referenzhash. Einzelheiten und Prüfung: [Inhaltsbibliothek 0.4.0](CONTENT_LIBRARY_040.md). Die nachfolgenden Übernahmeberichte beschreiben frühere Zustände.
+
 ## Android-Katalog 0.3.0
 
 Der Playlist-Parser ist seit dieser Iteration eine dokumentierte Ableitung: Streaming-Sink statt vollständigem zweiten RAM-Katalog, frühe Formatprüfung, geliehene Attributwerte und weniger URL-Zwischenobjekte. Die Klassifikationsprioritäten bleiben erhalten. `upstream-sha256.json` bewahrt den ursprünglichen Windows-Hash zusätzlich zum geprüften lokalen Hash. Recovery, Buffering und Telemetrie bleiben unveränderte Übernahmen. Die Windows-Anwendung wurde nicht verändert.

@@ -26,11 +26,17 @@ import java.util.concurrent.atomic.AtomicLong
 /** Real Media3 + Rust/JNI + Activity + D-pad, using only synthetic local provider content. */
 @RunWith(AndroidJUnit4::class)
 class TvEndToEndTest {
+    @get:org.junit.Rule val remoteUi=RemoteUiRule()
+    private fun tab(scenario:ActivityScenario<MainActivity>,title:String){
+        scenario.onTvActivity{activity->assertTrue(activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants.filterIsInstance<android.widget.Button>().first{it.text.toString()==title}.requestFocus())}
+        assertTrue("Remote section focus: $title",UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).wait(Until.hasObject(By.text(title).focused(true)),5_000))
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressDPadCenter()
+    }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
     private fun control(scenario: ActivityScenario<MainActivity>, description: String) {
-        scenario.onActivity { activity ->
+        scenario.onTvActivity { activity ->
             val pane=activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants.filterIsInstance<PlayerPane>().first()
             pane.showControls()
             assertTrue(pane.buttons.values.first { it.contentDescription==description }.requestFocus())
@@ -69,8 +75,8 @@ class TvEndToEndTest {
             }
             try {
                 store.save(listOf(JSONObject().put("kind", "file").put("name", "Performance").put("uri", android.net.Uri.fromFile(playlist).toString())))
-                ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                    assertTrue(device.wait(Until.hasObject(By.text("Performance Live").focused(true)), 20_000))
+                withTvActivity { scenario ->
+                    assertTrue(device.wait(Until.hasObject(By.desc("Performance Live").focused(true)), 20_000))
                     val started = SystemClock.elapsedRealtime()
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · Performance Live")), 20_000))
@@ -80,7 +86,7 @@ class TvEndToEndTest {
                     lateinit var controller: PlaybackController
                     var targetMs = 0
                     lateinit var previousPlayer: androidx.media3.exoplayer.ExoPlayer
-                    scenario.onActivity { activity ->
+                    scenario.onTvActivity { activity ->
                         val playback = MainActivity::class.java.getDeclaredField("playback").apply { isAccessible = true }.get(activity) as PlaybackController
                         controller = playback
                         previousPlayer = playback.player!!
@@ -95,7 +101,7 @@ class TvEndToEndTest {
                     }
                     val deadline = SystemClock.elapsedRealtime() + 10_000
                     while (loadedAt.get() == 0L && SystemClock.elapsedRealtime() < deadline) {
-                        scenario.onActivity { activity ->
+                        scenario.onTvActivity { activity ->
                             val playback = MainActivity::class.java.getDeclaredField("playback").apply { isAccessible = true }.get(activity) as PlaybackController
                             if (playback.player != null && playback.player !== previousPlayer) loadedAt.set(SystemClock.elapsedRealtime())
                         }
@@ -107,14 +113,16 @@ class TvEndToEndTest {
                     android.util.Log.i("IptvPerformance", JSONObject().put("startup_status_ms", startupMs)
                         .put("eof_reload_ms", retryMs).put("live_target_ms", targetMs).toString())
                     // Enter a normal backoff, then stop before it expires.
-                    device.findObject(By.text("Movies (1)")).click()
-                    assertTrue(device.wait(Until.hasObject(By.text("Performance Retry")), 5_000))
-                    device.findObject(By.text("Performance Retry")).click()
+                    tab(scenario,"Movies (1)")
+                    assertTrue(device.wait(Until.hasObject(By.desc("Performance Retry")), 5_000))
+                    scenario.onTvActivity { activity -> activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Performance Retry" }.requestFocus() }
+                    device.pressDPadCenter()
+                    assertTrue(device.wait(Until.hasObject(By.text("Abspielen").focused(true)),5_000))
                     device.pressDPadCenter()
                     var waiting = false
                     val retryDeadline = SystemClock.elapsedRealtime() + 5_000
                     while (!waiting && SystemClock.elapsedRealtime() < retryDeadline) {
-                        scenario.onActivity { waiting = controller.phase == "waiting" }
+                        scenario.onTvActivity { waiting = controller.phase == "waiting" }
                         if (!waiting) SystemClock.sleep(20)
                     }
                     assertTrue("Broken source enters backoff", waiting)
@@ -138,17 +146,19 @@ class TvEndToEndTest {
             }
             try {
                 store.save(listOf(JSONObject().put("kind","file").put("name","E2E").put("uri", android.net.Uri.fromFile(playlist).toString())))
-                ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                    assertTrue(device.wait(Until.hasObject(By.text("Fixture Live")), 20_000))
-                    assertTrue("First channel receives remote focus", device.wait(Until.hasObject(By.text("Fixture Live").focused(true)), 5_000))
+                withTvActivity { scenario ->
+                    assertTrue(device.wait(Until.hasObject(By.desc("Fixture Live")), 20_000))
+                    assertTrue("First channel receives remote focus", device.wait(Until.hasObject(By.desc("Fixture Live").focused(true)), 5_000))
                     // Request real focus, then activate exclusively with a remote center key.
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · Fixture Live")), 20_000))
                     assertTrue(server.mediaRequests.get() > 0)
-                    device.findObject(By.text("Movies (3)")).click()
-                    assertTrue(device.wait(Until.hasObject(By.text("Fixture VOD")), 5_000))
-                    assertFalse(device.hasObject(By.text("Fixture Live")))
-                    device.findObject(By.text("Fixture VOD")).click()
+                    tab(scenario,"Movies (3)")
+                    assertTrue(device.wait(Until.hasObject(By.desc("Fixture VOD")), 5_000))
+                    assertFalse(device.hasObject(By.desc("Fixture Live")))
+                    scenario.onTvActivity { activity -> activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Fixture VOD" }.requestFocus() }
+                    device.pressDPadCenter()
+                    assertTrue(device.wait(Until.hasObject(By.text("Abspielen").focused(true)),5_000))
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · Fixture VOD")), 15_000))
                     device.pressKeyCode(android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
@@ -165,7 +175,7 @@ class TvEndToEndTest {
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · Fixture Disconnect")),15_000))
                     device.executeShellCommand("screencap -p /sdcard/Download/iptv-tv-e2e.png")
                     control(scenario,"Vollbild")
-                    scenario.onActivity { activity ->
+                    scenario.onTvActivity { activity ->
                         val root=activity.findViewById<android.view.ViewGroup>(android.R.id.content)
                         val pane=root.descendants.filterIsInstance<PlayerPane>().first()
                         assertTrue(pane.isFullscreen)
@@ -180,7 +190,7 @@ class TvEndToEndTest {
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.desc("Wiedergabe starten").focused(true)),5000))
                     device.pressBack()
-                    scenario.onActivity { activity ->
+                    scenario.onTvActivity { activity ->
                         val pane=activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants.filterIsInstance<PlayerPane>().first()
                         assertTrue(pane.isFullscreen); assertFalse(pane.controlsVisible)
                     }
@@ -199,7 +209,9 @@ class TvEndToEndTest {
                     control(scenario,"Stopp")
                     device.pressBack()
                     device.pressBack()
-                    // Back closes controls, returns to the channel list, then leaves the app.
+                    // Back closes controls, returns to film details, then the grid and the app exit.
+                    device.pressBack()
+                    assertTrue(device.wait(Until.hasObject(By.desc("Fixture VOD")),5_000))
                     device.pressBack()
                     assertTrue(device.wait(Until.gone(By.pkg("de.iptv.tv")),5_000))
                 }
@@ -220,37 +232,37 @@ class TvEndToEndTest {
         }
         try {
             store.save(listOf(JSONObject().put("kind", "file").put("name", "Sections").put("uri", android.net.Uri.fromFile(playlist).toString())))
-            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                assertTrue(device.wait(Until.hasObject(By.text("Fixture News")), 20_000))
-                assertFalse(device.hasObject(By.text("Fixture Movie HD")))
-                device.findObject(By.text("Movies (3)")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Fixture Movie HD")), 5_000))
+            withTvActivity { scenario ->
+                assertTrue("Initial library focus is ready before remote section switching",device.wait(Until.hasObject(By.desc("Fixture News").focused(true)),20_000))
+                assertFalse(device.hasObject(By.desc("Fixture Movie HD")))
+                tab(scenario,"Movies (3)")
+                assertTrue(device.wait(Until.hasObject(By.desc("Fixture Movie HD")), 5_000))
                 assertFalse(device.hasObject(By.text("Fixture News")))
                 device.findObject(By.desc("Kategorie suchen")).text = "com"
                 assertTrue(device.wait(Until.hasObject(By.desc("Comedy (1)")), 5_000))
                 assertFalse(device.hasObject(By.desc("Drama (2)")))
                 // Category search narrows only the category list, not the channel results.
-                assertTrue(device.hasObject(By.text("Fixture Movie HD")))
+                assertTrue(device.hasObject(By.desc("Fixture Movie HD")))
                 device.findObject(By.desc("Comedy (1)")).click()
                 device.pressDPadCenter()
-                assertTrue(device.wait(Until.gone(By.text("Fixture Movie HD")), 5_000))
-                assertTrue(device.hasObject(By.text("Fixture Funny")))
+                assertTrue(device.wait(Until.gone(By.desc("Fixture Movie HD")), 5_000))
+                assertTrue(device.hasObject(By.desc("Fixture Funny")))
                 device.findObject(By.desc("Filme suchen")).text = "missing"
                 assertTrue(device.wait(Until.hasObject(By.text("Keine Treffer für „missing“.")), 5_000))
                 assertTrue(device.hasObject(By.text("Suche zurücksetzen")))
                 device.findObject(By.desc("Filme suchen")).text = ""
-                assertTrue(device.wait(Until.hasObject(By.text("Fixture Funny")), 5_000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Fixture Funny")), 5_000))
                 device.findObject(By.desc("Kategorie suchen")).text = ""
                 device.findObject(By.desc("Alle Kategorien")).click()
                 device.pressDPadCenter()
-                assertTrue(device.wait(Until.hasObject(By.text("Fixture Movie HD")), 5_000))
+                assertTrue(device.wait(Until.hasObject(By.desc("Fixture Movie HD")), 5_000))
                 device.findObject(By.desc("Filme suchen")).text = "HD"
-                assertTrue(device.wait(Until.gone(By.text("Fixture Movie SD")), 5_000))
-                assertTrue(device.hasObject(By.text("Fixture Movie HD")))
-                device.findObject(By.text("Series (1)")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Fixture Show S01E01")), 5_000))
-                assertFalse(device.hasObject(By.text("Fixture Movie HD")))
-                scenario.onActivity { activity ->
+                assertTrue(device.wait(Until.gone(By.desc("Fixture Movie SD")), 5_000))
+                assertTrue(device.hasObject(By.desc("Fixture Movie HD")))
+                tab(scenario,"Series (1)")
+                assertTrue(device.wait(Until.hasObject(By.desc("Fixture Show")), 5_000))
+                assertFalse(device.hasObject(By.desc("Fixture Movie HD")))
+                scenario.onTvActivity { activity ->
                     val field = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
                         .descendants.filterIsInstance<android.widget.EditText>()
                         .first { it.contentDescription == "Serien / Episoden suchen" }
@@ -258,7 +270,7 @@ class TvEndToEndTest {
                 }
                 assertTrue(device.hasObject(By.desc("Drama (1)")))
                 device.executeShellCommand("screencap -p /sdcard/Download/iptv-tv-sections.png")
-                device.findObject(By.text("Live (1)")).click()
+                tab(scenario,"Live (1)")
                 assertTrue(device.wait(Until.hasObject(By.text("Fixture News")), 5_000))
             }
         } finally { store.save(old); playlist.delete() }
@@ -275,14 +287,14 @@ class TvEndToEndTest {
         }
         try {
             store.save(listOf(JSONObject().put("kind","file").put("name","Paging").put("uri",android.net.Uri.fromFile(playlist).toString())))
-            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withTvActivity { scenario ->
                 assertTrue(device.wait(Until.hasObject(By.text("Sender 000")),20_000))
                 assertTrue(device.hasObject(By.text("developed by Ninos Oshana")))
                 assertFalse(device.hasObject(By.text("+ URL")))
                 assertFalse(device.hasObject(By.text("Pause / Play")))
                 val first=device.findObject(By.text("Sender 000")).visibleBounds
                 assertTrue("Compact list row",first.height()<=80)
-                scenario.onActivity { activity ->
+                scenario.onTvActivity { activity ->
                     val root=activity.findViewById<android.view.ViewGroup>(android.R.id.content)
                     assertTrue(root.descendants.first { it.contentDescription=="Einstellungen" }.requestFocus())
                 }
@@ -291,7 +303,7 @@ class TvEndToEndTest {
                 assertTrue(device.hasObject(By.text("URL hinzufügen")))
                 device.pressBack()
                 assertTrue(device.wait(Until.hasObject(By.desc("Einstellungen").focused(true)),5000))
-                fun scrollTo(position: Int) { scenario.onActivity { activity ->
+                fun scrollTo(position: Int) { scenario.onTvActivity { activity ->
                     val list=activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants
                         .filterIsInstance<androidx.recyclerview.widget.RecyclerView>().first { it.contentDescription=="Eintragsliste" }
                     list.scrollToPosition(position)
@@ -300,7 +312,7 @@ class TvEndToEndTest {
                     val deadline=SystemClock.elapsedRealtime()+5000
                     var count=0
                     while(count<expected && SystemClock.elapsedRealtime()<deadline) {
-                        scenario.onActivity { activity ->
+                        scenario.onTvActivity { activity ->
                             count=activity.findViewById<android.view.ViewGroup>(android.R.id.content).descendants
                                 .filterIsInstance<androidx.recyclerview.widget.RecyclerView>().first { it.contentDescription=="Eintragsliste" }.adapter!!.itemCount
                         }

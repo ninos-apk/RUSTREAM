@@ -12,12 +12,14 @@ android {
     namespace = "de.iptv.tv"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
+    val projectNdk=rootProject.file(".tools/android-sdk/ndk/28.2.13676358")
+    if(projectNdk.isDirectory)ndkPath=projectNdk.absolutePath
     defaultConfig {
         applicationId = "de.iptv.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.3.1"
+        versionCode = 9
+        versionName = "0.4.1"
         val digest = MessageDigest.getInstance("SHA-256")
         rootProject.fileTree("crates").matching { include("**/*.rs", "**/Cargo.toml") }.files.sortedBy { it.path }.forEach { digest.update(it.readBytes()) }
         buildConfigField("String", "CORE_BUILD_ID", "\"" + digest.digest().joinToString("") { "%02x".format(it) }.take(16) + "\"")
@@ -41,7 +43,7 @@ android {
 }
 val buildRust by tasks.registering(Exec::class) {
     workingDir(rootDir)
-    commandLine("pwsh", "-NoProfile", "-File", "scripts/build-rust.ps1")
+    commandLine("powershell.exe", "-NoProfile", "-File", "scripts/build-rust.ps1")
     inputs.files(rootProject.fileTree("crates") { include("**/*.rs", "**/Cargo.toml") }, rootProject.file("Cargo.lock"), rootProject.file("scripts/build-rust.ps1"))
     outputs.dir("src/main/jniLibs")
 }

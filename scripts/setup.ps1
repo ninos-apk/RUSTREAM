@@ -38,13 +38,10 @@ if (!(Test-Path "$env:JAVA_HOME/bin/java.exe")) {
     Move-Item -LiteralPath $jdkSource.FullName -Destination $env:JAVA_HOME
     $package | ConvertTo-Json | Set-Content "$tvRoot/.tools/jdk-source.json"
 }
-if (!(Test-Path "$tvRoot/.tools/gradle-8.13/bin/gradle.bat")) {
-    $checksumFile = "$tvRoot/.tools/downloads/gradle.sha256"
-    Invoke-WebRequest 'https://services.gradle.org/distributions/gradle-8.13-bin.zip.sha256' -OutFile $checksumFile
-    $hash = (Get-Content -Raw $checksumFile).Trim()
-    Get-VerifiedZip 'https://services.gradle.org/distributions/gradle-8.13-bin.zip' $hash 'gradle-8.13' "$tvRoot/.tools/gradle-unpack"
-    Move-Item -LiteralPath "$tvRoot/.tools/gradle-unpack/gradle-8.13" -Destination "$tvRoot/.tools/gradle-8.13"
-}
+# The wrapper pins and verifies the Gradle distribution selected by the project.
+# Do not install a separate, outdated Gradle after an Android Studio upgrade.
+& "$tvRoot/gradlew.bat" --version
+if ($LASTEXITCODE) { throw 'Gradle wrapper setup failed' }
 if (!(Test-Path "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat")) {
     Get-VerifiedZip 'https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip' '90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a' 'android-cli' "$tvRoot/.tools/android-cli-unpack"
     New-Item -ItemType Directory -Force "$env:ANDROID_HOME/cmdline-tools" | Out-Null

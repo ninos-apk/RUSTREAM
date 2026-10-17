@@ -19,6 +19,10 @@ try {
     & "$PSScriptRoot/verify-package.ps1"
     New-Item -ItemType Directory -Force artifacts | Out-Null
     Copy-Item app/build/outputs/apk/debug/app-debug.apk artifacts/iptv-tv-debug.apk
-    if ($Release) { Copy-Item app/build/outputs/bundle/release/app-release.aab artifacts/iptv-tv-release-unsigned.aab }
+    Copy-Item app/build/outputs/apk/debug/app-debug.apk artifacts/RUSTREAM-IPTV-debug.apk
+    if ($Release) {
+        Copy-Item app/build/outputs/bundle/release/app-release.aab artifacts/iptv-tv-release-unsigned.aab
+        Copy-Item app/build/outputs/bundle/release/app-release.aab artifacts/RUSTREAM-IPTV-release-unsigned.aab
+    }
 } finally { Pop-Location }
 

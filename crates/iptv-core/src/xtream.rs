@@ -110,18 +110,22 @@ pub fn parse(
             playlist.categories[category]
                 .channels
                 .push(playlist.channels.len());
-            playlist.channels.push(Channel {
-                search_key: format!("{name} {group} {tvg_id}").to_lowercase(),
-                name,
-                kind: content_kind,
-                category,
-                url: url.to_string(),
-                tvg_id,
-                logo: stream["stream_icon"].as_str().map(str::to_owned),
-                headers: StreamHeaders::default(),
-                is_live: kind == "live",
-                series_id: None,
-            });
+            playlist.channels.push(
+                Channel {
+                    search_key: format!("{name} {group} {tvg_id}").to_lowercase(),
+                    name,
+                    kind: content_kind,
+                    category,
+                    url: url.to_string(),
+                    tvg_id,
+                    logo: artwork(stream),
+                    headers: StreamHeaders::default(),
+                    is_live: kind == "live",
+                    series_id: None,
+                    ..Default::default()
+                }
+                .with_group(&group),
+            );
         }
         Ok(())
     };
@@ -137,6 +141,16 @@ fn id(value: &Value) -> Option<String> {
         Value::Number(n) => Some(n.to_string()),
         _ => None,
     }
+}
+fn artwork(stream: &Value) -> Option<String> {
+    ["cover", "stream_icon", "cover_big"]
+        .into_iter()
+        .find_map(|key| {
+            stream[key]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .map(str::to_owned)
 }
 pub fn value_id(value: &Value) -> Option<String> {
     id(value)
@@ -269,11 +283,13 @@ pub fn build_manifest(
                     category: 0,
                     url: url.to_string(),
                     tvg_id,
-                    logo: None,
+                    logo: artwork(&stream),
                     headers: StreamHeaders::default(),
                     is_live: kind == ContentKind::LiveTv,
                     series_id: (kind == ContentKind::Series).then_some(stream_id),
-                },
+                    ..Default::default()
+                }
+                .with_group(&group),
                 group,
             )?;
             summary.count += 1;

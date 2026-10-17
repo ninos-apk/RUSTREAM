@@ -1,9 +1,9 @@
 [
   {
     "path": "src/playlist.rs",
-    "sha256": "1B6CCF631210C45F2D680E061B4E30CE98C04747CB616715169A6077912C3727",
-    "upstream_sha256": "04BEFC78204FDC47361F28795D08C40E19D02CFF1CA2463100169FD41C565219",
-    "adaptation": "Streaming sink, format validation and lazy series metadata for Android catalog 0.3.0"
+    "sha256": "547483AD0CC0EC99F7897B20F75BFCA9CE4AA22D8F70A3D2837E73259A873BF2",
+    "upstream_sha256": "90D4AD9A6502CE55D56984D7C5915797CF2534E0EACBDE0D778FEEAD020F29BC",
+    "adaptation": "Windows 17dd21f content classification and episode parsing, Android streaming sink and catalog 0.4.0"
   },
   {
     "path": "src/recovery.rs",

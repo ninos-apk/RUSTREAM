@@ -1,6 +1,6 @@
 # Windows-Inhaltslogik nach Android TV: Analyse und Umsetzungsplan
 
-Stand: 17. Oktober 2026. Status: **Analyse abgeschlossen, Umsetzung wartet auf das Go des Nutzers.**
+Stand: 17. Oktober 2026. Status: **Windows-Portierung und ergänzte Detailnavigation zur Umsetzung freigegeben. Zuletzt gesehen, Favoriten und Fortsetzen sind als nächster Ausbau geplant.** Die Abschnitte 1–6 dokumentieren die ursprüngliche Analyse vor dem Go; Abschnitt 7 ergänzt die neuen Anforderungen. Der tatsächlich geprüfte Implementierungsstand steht in `CONTENT_LIBRARY_040.md`.
 
 ## 1. Geprüfter Stand
 
@@ -191,3 +191,75 @@ Reale Wiedergabetests zunächst mit synthetischen lokalen Streams durchführen. 
 - In dieser Analyse keine App-/Parserimplementierung geändert, keine APK installiert und keine Anbieterstreams oder Cover abgerufen. Neu erstellt wurde ausschließlich dieses Plandokument; der Testlauf aktualisierte lokale Build-Artefakte.
 
 Empfohlene Umsetzung nach dem Go: Schritte 1–3 als fachliche Basis, anschließend 4–5 als TV-Oberfläche, danach die vollständige Abnahme aus Schritt 6. Kernumfang sind sämtliche hier beschriebenen Parser-, Film- und Serienfunktionen einschließlich sicherem Katalogübergang und TV-Navigation.
+
+## 7. Ergänzung: Bibliotheksbreite, Filmdetails, Verlauf und Favoriten
+
+### 7.1 Navigation — laufende Implementierung
+
+- Film- und Serienbibliothek verwenden die gesamte verfügbare Breite neben den Kategorien. Player und Verbindungsdetails bleiben dort ausgeblendet, auch wenn bereits etwas läuft. Die bestehende Wiedergabe kann weiterlaufen.
+- Kleinere Poster mit adaptiver Spaltenzahl: Zielbreite ungefähr 108 dp, bei großer Schrift 146 dp; Seitenverhältnis 2:3, lesbarer Titel und Jahr/Qualität. Keine feste Spaltenzahl unabhängig von Schriftgröße und Bildschirmbreite.
+- Serienkarte → Serienansicht mit Cover, Titel, Staffelauswahl, Episodenliste und Player rechts. Öffnen und Staffelwechsel starten keine Wiedergabe; OK auf Episode startet diese.
+- Filmkarte → Filmansicht mit Cover, vollständigem Titel, vorhandenen Metadaten, explizitem Play-Button und Player rechts. Erst Play startet den Film. Vollbild verwendet weiterhin dieselbe PlayerPane ohne neuen Load.
+- Zurück aus Details stellt Seite und Kartenfokus wieder her. Kategorie-/Bereichswechsel schließt Details. Live behält die bestehende dreispaltige Ansicht. Tests prüfen den versteckten Player auch nach vorheriger Wiedergabe sowie Fokus und große Schrift.
+
+### 7.2 Architekturbefund und kleinste passende Erweiterung
+
+`MainActivity` besitzt Bereich, Kategorie, Such-/Pagingzustand und separate Wiedergabekontexte. `PlaybackController` besitzt Media3-Position, Dauer, Pause-/Fehler-/Endestatus und einen bestehenden Sekundenticker. `CatalogStore` verwaltet austauschbare, revisionsgebundene SQLite-Kataloggenerationen. Deren numerische Eintrags-/Serien-IDs ändern sich bei Neuimporten und eignen sich **nicht** als dauerhafte Benutzeridentitäten.
+
+Für Quellen existiert bereits `SourceStore`: Keystore-verschlüsseltes JSON in `noBackupFilesDir` mit `AtomicFile`. Diese Speichertechnik wird für einen kleinen versionierten `UserLibraryStore` wiederverwendet; keine neue Datenbank, kein Server und keine Profile. Benutzerzustand liegt außerhalb austauschbarer Kataloggenerationen. Ein einzelner IO-Writer serialisiert Änderungen und schreibt atomare Snapshots; kein Keystore-/Dateizugriff im Media3-Callback. JSON-Strukturen werden typisiert und von Quellencredentials getrennt gehalten.
+
+Der Core erhält indizierte dauerhafte Inhaltsschlüssel und begrenzte Auflösungs-/Batchabfragen. Dadurch können bis zu 15 Verlaufseinträge oder eine Seite Favoriten ohne vollständigen Katalogscan wieder auf aktuelle revisionsgebundene IDs abgebildet werden. Bestehende DTO-/UI-Grenzen bleiben bestehen. Das ist die einzige notwendige Katalogerweiterung; normale Such-/Serienabfragen und Wiedergabe bleiben erhalten.
+
+### 7.3 Identitäten und Datenmodelle
+
+Schlüssel enthalten einen Quellenbezug, Typ und stabile Inhaltsidentität. Xtream nutzt Anbieter-IDs einschließlich Objektart; Serie und Episode erhalten getrennte Schlüssel. M3U nutzt eine eindeutige TVG-ID, wenn innerhalb Quelle/Typ tatsächlich eindeutig, andernfalls den Hash der unveränderten Original-Streamadresse. Filmversionen und unterschiedliche Streams bleiben unterscheidbar. M3U-Serien verwenden die bereits vorhandene normalisierte Serienidentität innerhalb ihrer Quelle. Wiederholte identische Einträge werden dedupliziert, verschiedene gleichnamige Serienanbieter-IDs nicht.
+
+Die Quellenidentität verwendet zunächst den vorhandenen Quellenfingerabdruck. Gleiche Quelle mit neuem Import oder anderer Sortierung erhält denselben Bezug. Geänderte Adresse/Zugangsdaten, rotierende Streamadressen oder umbenannte M3U-Serien können die Identität ändern: niemals allein wegen eines gleichen Titels automatisch fremde Inhalte zuordnen. Nicht auflösbare Einträge bleiben gespeichert und werden verständlich als derzeit nicht verfügbar angezeigt; erneute Verfügbarkeit stellt die Zuordnung wieder her. Eine automatische übergreifende Identitätsmigration wäre ein gesonderter Ausbau.
+
+| Logisches Modell | Persistierte Informationen |
+| --- | --- |
+| Verlauf je Bereich | eindeutiger Inhaltsschlüssel, letzter tatsächlicher Wiedergabestart, Metadaten-/Bildreferenz als Fallback; höchstens 15 Einträge |
+| Serienverlauf | genau ein Serienschlüssel, letzter Episodenschlüssel, optionale Staffel-/Episodennummer und Episodentitel; Fortschritt separat |
+| Favoriten je Bereich | eindeutiger Film-/Serien-/Kanalschlüssel, Zeitpunkt des Markierens, Fallback-Metadaten; keine Episodenfavoriten |
+| Fortschritt | Film- oder Episodenschlüssel, Position und bekannte Dauer in Millisekunden, aktualisiert am, Status teilweise/abgeschlossen |
+
+Bildadressen mit möglichen Credentials bleiben wie andere sensible Daten verschlüsselt; keine Posterbytes in Benutzer-Snapshots. Verlauf, Favoriten und Fortschritt sind logisch unabhängig, auch wenn sie gemeinsam atomar gespeichert werden. Entfernen eines Favoriten oder Verlaufseintrags löscht weder die anderen Listen noch Fortschritt. Ein Auswurf aus den letzten 15 löscht keinen Fortschritt.
+
+### 7.4 Ereignisse, Reihenfolge und Fortsetzen
+
+1. Nur tatsächlicher Beginn der Wiedergabe (`isPlaying` und bestätigter Medienfortschritt/erstes Medienereignis) erzeugt einen Verlaufseintrag. Auswahl, Detailöffnung, Staffelwechsel und fehlgeschlagener Stream tun dies nicht. Kurze erfolgreiche Wiedergabe darf erscheinen; keine künstliche Mindestsehzeit. Ein Wiedergabeversuch wird einmal registriert, Retry oder Pause/Fortsetzen erzeugen keine Duplikate.
+2. Atomar vorhandenen Schlüssel aktualisieren, nach vorne stellen und je Live/Movies/Series auf 15 eindeutige Einträge kürzen. Reihenfolge durch monotone Ereignisfolge zusätzlich zum Zeitstempel absichern. Fortschrittsspeicherung verändert diese Reihenfolge nicht jede Sekunde.
+3. Den vorhandenen Ticker verwenden und geänderte Film-/Episodenposition etwa alle 10 Sekunden zusammenfassen. Zusätzlich Pause, Streamwechsel, Stop, Ende und `onStop` speichern. Keine parallele Zeitmessung; Position/Dauer stammen aus Media3. Bei Prozessabbruch bleiben normalerweise höchstens rund 10 Sekunden ungespeichert; ein hartes Ausschalten kann einen gerade laufenden Schreibvorgang verhindern.
+4. Live speichert ausschließlich den Kanal und die letzte Nutzung, keine EPG-Sendung und keine Fortsetzungsposition. Nicht seekbare/unbekannt lange VOD-Inhalte werden ohne erfundene Prozentanzeige dargestellt.
+5. Bei Film-/Episodenauswahl gespeicherte Position nach Timeline-/Seekbarkeitsprüfung einmal anwenden, nicht bei jedem READY-/Retry-Ereignis. Ungültige Position auf den verfügbaren Zeitraum begrenzen. In der Detailansicht „Fortsetzen bei 23:10“ und „Von Anfang an“ anbieten.
+6. Bei `STATE_ENDED` abgeschlossen markieren. Als zusätzlicher Vorschlag für Inhalte ohne zuverlässiges Endereignis: mindestens 95 % und höchstens 120 Sekunden Rest, nur bei bekannter positiver Dauer. Abgeschlossene Inhalte starten erneut bei 0; die letzte Episode bleibt als zuletzt gesehen erkennbar. Keine automatische nächste Episode im Rahmen dieses Ausbaus.
+7. Episodenstart aktualisiert den einen Serienverlaufseintrag und den Fortschritt dieser Episode. Bloßes Navigieren verändert weder letzte Episode noch Serienfavorit. Serienöffnung zeigt die gespeicherte Staffel/Episode und bietet Fortsetzen; eine bewusste andere Episodenauswahl aktualisiert den Verlauf erst bei erfolgreichem Start.
+
+### 7.5 Kategorien und TV-Bedienung
+
+In Live, Movies und Series erscheinen „Zuletzt gesehen“ und „Favoriten“ als eigene Kategorien vor den Providergruppen. Eine explizite Filterart (`all`, `provider`, `recent`, `favorites`) ersetzt die Annahme, dass jede Kategorie eine numerische Provider-ID ist. Bereichswechsel, Suche und Rücksprung behalten diesen Kontext; Channel +/− nutzt die beim Start gespeicherte Ergebnisreihenfolge.
+
+Filmkarten und Serienkarten sowie Kanalzeilen erhalten einen direkt bedienbaren Stern mit zugänglichem Namen „… zu Favoriten hinzufügen/aus Favoriten entfernen“ und eindeutigem aktivem Zustand. Der Adapter darf dazu nicht mehr pauschal alle Kindfokusse blockieren: Karte öffnen und Stern bleiben getrennte D-Pad-Ziele ohne Doppelaktion. Detailansichten zeigen denselben Favoritenstatus, bei Serien stets den der ganzen Serie. Maus/Touch bedienen dieselben Aktionen. Nach Entfernen in der Favoritenliste Fokus auf den nächsten erreichbaren Eintrag oder die Leeransicht zurückführen.
+
+Film-/Serienkarten zeigen kompakt Position, bei Serien zusätzlich letzte Staffel/Episode, optional einen Fortschrittsbalken. Vollständige Information bleibt in Details erreichbar. Live zeigt Logo und Kanalname ohne Fortschritt. Passende Leeransichten unterscheiden noch keinen Verlauf, keine Favoriten und derzeit nicht verfügbare Inhalte; keine leeren Playerflächen im Bibliotheksraster.
+
+### 7.6 Umsetzung und verbindliche Abnahme des Folgeausbaus
+
+Reihenfolge: stabile Katalogschlüssel und Auflösung → typisierter atomarer Store → Playerereignisse und Resume → Kategorien/Sterne/Detailanzeigen → vollständige Regression. Keine nur optischen Favoriten oder flüchtigen Verlaufslisten ausliefern.
+
+| Prüfung | Erwartung |
+| --- | --- |
+| 16 Inhalte pro Bereich, danach Wiederholung | jeweils genau 15, ältester verdrängt, erneut gestarteter Inhalt genau einmal zuerst; deterministische Ordnung bei gleicher Uhrzeit |
+| Mehrere Folgen einer Serie | ein Serienobjekt; letzte Staffel/Folge aktualisiert, jeder Episodenfortschritt separat |
+| Restart/Prozessneustart | alle drei Verläufe, Favoriten und Film-/Episodenposition wiederhergestellt; echte Datei neu öffnen, kein Test nur mit derselben Storeinstanz |
+| Neustart nach Pause/Stop und periodischem Save | Position/Dauer korrekt; kein irrtümliches Speichern einer alten Playerinstanz unter neuem Inhalt |
+| Live/Fehler/Detailöffnung | nur erfolgreich gespielter Kanal erscheint; keine Sendung/Liveposition, kein Verlauf durch Details oder Streamfehler |
+| Fortsetzen/Abschluss | Seek einmal nach gültiger Timeline; unbekannte Dauer/kein Seek robust; beendet startet bei 0, „Von Anfang an“ funktioniert |
+| Favoriten an/aus | persistiert in allen drei Bereichen; Serie ausschließlich als Show, niemals Folgen; Änderungen sofort sichtbar |
+| Unabhängigkeit | Favorit entfernen erhält Fortschritt/Verlauf; Verlauf entfernen oder verdrängen erhält Favorit/Fortschritt |
+| Neuimport/Quellenwechsel | Sortierung und neue Revision erhalten Zuordnung; identische Titel verschiedener Quellen und Filmvarianten bleiben getrennt; fehlender Inhalt löscht keine Benutzerdaten |
+| Schreibfehler/Abbruch | vorheriger atomarer Snapshot lesbar, keine Teilzustände; Fehler sichtbar, Wiedergabe und vorhandene Daten weiter nutzbar |
+| TV/UI | D-Pad, Sterne ohne versehentlichen Start, Rücksprungfokus, leere Listen, lange arabische Titel, doppelte Schriftgröße, Screenshots aller Spezialkategorien |
+| Abschluss | Rust-/JVM-/Emulatortests, Lint, Debug- und R8-Release-Build/APK/AAB sowie Paket-/Datenschutzprüfung wiederholen |
+
+Diese Erweiterung ist geplant; sie wird im aktuellen 0.4.0-Prüfbericht ausdrücklich nicht als bereits implementiert ausgegeben.

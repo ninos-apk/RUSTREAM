@@ -1,5 +1,7 @@
 # Live, Movies und Series – Version 0.1.2
 
+Historischer Bericht. Der aktuelle Stand mit Filmrastern, gruppierten M3U-Serien und Schema-2-Upgrade steht in [Filme und Serien 0.4.0](CONTENT_LIBRARY_040.md).
+
 15. Oktober 2026. Die Android-TV-App verwendet den aktualisierten M3U-Parser aus dem benachbarten Windows-Projekt. `playlist.rs` wurde unverändert übernommen; der Herkunftshash wurde aktualisiert.
 
 ## Verhalten

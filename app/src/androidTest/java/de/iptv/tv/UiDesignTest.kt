@@ -25,6 +25,7 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class UiDesignTest {
+    @get:org.junit.Rule val remoteUi=RemoteUiRule()
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val context=instrumentation.targetContext
     private val device=UiDevice.getInstance(instrumentation)
@@ -33,14 +34,14 @@ class UiDesignTest {
     private fun waitFor(message:String,check:(MainActivity)->Boolean,scenario:ActivityScenario<MainActivity>) {
         val deadline=SystemClock.elapsedRealtime()+10_000
         var done=false
-        while(!done && SystemClock.elapsedRealtime()<deadline){scenario.onActivity { done=check(it) };if(!done)SystemClock.sleep(40)}
+        while(!done && SystemClock.elapsedRealtime()<deadline){scenario.onTvActivity { done=check(it) };if(!done)SystemClock.sleep(40)}
         assertTrue(message,done)
     }
     @Test fun emptyStartAndInvalidFormKeepLabelsAndInput() {
         val store=SourceStore(context);val old=store.load()
         try {
             store.save(emptyList())
-            ActivityScenario.launch(MainActivity::class.java).use {
+            withTvActivity {
                 assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
                 device.pressDPadCenter()
                 assertTrue(device.wait(Until.hasObject(By.text("URL hinzufügen")),5_000))
@@ -66,26 +67,26 @@ class UiDesignTest {
             }
             try {
                 store.save(listOf(JSONObject().put("kind","file").put("name","UI Demo").put("uri",android.net.Uri.fromFile(file).toString())))
-                ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                    assertTrue(device.wait(Until.hasObject(By.text("UI Live").focused(true)),15_000))
+                withTvActivity { scenario ->
+                    assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),15_000))
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · UI Live")),15_000))
                     device.pressDPadRight()
                     waitFor("Preview has persistent visible focus",{pane(it).video.hasFocus() && pane(it).previewFocusVisible},scenario)
                     SystemClock.sleep(1700)
-                    scenario.onActivity { assertTrue(pane(it).previewFocusVisible);assertFalse(pane(it).buttons.containsKey("reconnect")) }
+                    scenario.onTvActivity { assertTrue(pane(it).previewFocusVisible);assertFalse(pane(it).buttons.containsKey("reconnect")) }
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-focus.png")
                     device.pressDPadLeft()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),5_000))
                     lateinit var before:ExoPlayer
-                    scenario.onActivity { before=controller(it).player!! }
+                    scenario.onTvActivity { before=controller(it).player!! }
                     device.pressDPadCenter()
                     waitFor("Same active channel opens fullscreen",{pane(it).isFullscreen},scenario)
-                    scenario.onActivity { assertSame(before,controller(it).player) }
+                    scenario.onTvActivity { assertSame(before,controller(it).player) }
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-fullscreen.png")
                     device.pressBack()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),5_000))
-                    scenario.onActivity { activity ->
+                    scenario.onTvActivity { activity ->
                         val refresh=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<android.widget.Button>().first { it.text=="Refresh" }
                         assertTrue(refresh.isEnabled);refresh.requestFocus()
                     }
@@ -94,7 +95,9 @@ class UiDesignTest {
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-overview.png")
                     device.findObject(By.text("Movies (1)")).click()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Film")),5_000))
-                    scenario.onActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="UI Film" }.requestFocus() }
+                    scenario.onTvActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="UI Film" }.requestFocus() }
+                    device.pressDPadCenter()
+                    assertTrue(device.wait(Until.hasObject(By.text("Abspielen").focused(true)),5_000))
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · UI Film")),10_000))
                     device.pressDPadRight();device.pressDPadDown()
@@ -111,9 +114,9 @@ class UiDesignTest {
         }
         try {
             store.save(listOf(JSONObject().put("kind","file").put("name","Quelle behalten").put("uri",android.net.Uri.fromFile(file).toString())))
-            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withTvActivity { scenario ->
                 assertTrue(device.wait(Until.hasObject(By.desc("Removal Demo")),10_000))
-                scenario.onActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Einstellungen" }.requestFocus() }
+                scenario.onTvActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Einstellungen" }.requestFocus() }
                 device.pressDPadCenter();device.pressDPadCenter()
                 assertTrue(device.wait(Until.hasObject(By.text("Gespeicherte Playlists")),5_000))
                 device.findObject(By.res("android:id/button3")).click()
@@ -135,9 +138,9 @@ class UiDesignTest {
         var seekPane:PlayerPane?=null
         try {
             store.save(emptyList())
-            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            withTvActivity { scenario ->
                 assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen")),10_000))
-                scenario.onActivity { activity ->
+                scenario.onTvActivity { activity ->
                     player=ExoPlayer.Builder(activity).build()
                     seekPane=PlayerPane(activity,uiScope,{}, { positions.add(it) }).apply {
                         video.player=player;hasSelection=true
@@ -155,15 +158,15 @@ class UiDesignTest {
                 SystemClock.sleep(1600)
                 instrumentation.sendKeySync(KeyEvent(down,SystemClock.uptimeMillis(),KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_RIGHT,0))
                 var afterRelease=0
-                scenario.onActivity { assertTrue(positions.last()>60_000);assertFalse(seekPane!!.seeking);afterRelease=positions.size }
+                scenario.onTvActivity { assertTrue(positions.last()>60_000);assertFalse(seekPane!!.seeking);afterRelease=positions.size }
                 SystemClock.sleep(500)
-                scenario.onActivity { assertEquals(afterRelease,positions.size) }
+                scenario.onTvActivity { assertEquals(afterRelease,positions.size) }
                 val again=SystemClock.uptimeMillis()
                 instrumentation.sendKeySync(KeyEvent(again,again,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT,0))
-                scenario.onActivity { seekPane!!.cancelSeek() }
+                scenario.onTvActivity { seekPane!!.cancelSeek() }
                 val stopped=positions.size
                 SystemClock.sleep(650)
-                scenario.onActivity { assertEquals(stopped,positions.size);player?.release();player=null }
+                scenario.onTvActivity { assertEquals(stopped,positions.size);player?.release();player=null }
             }
         } finally { uiScope.cancel();instrumentation.runOnMainSync { player?.release() };store.save(old) }
     }

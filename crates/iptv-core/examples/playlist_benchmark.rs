@@ -43,7 +43,7 @@ fn stats(playlist: &Playlist) -> Value {
             usize::from(bucket == "series" && c.kind != ContentKind::Series);
         ungrouped += usize::from(playlist.categories[c.category].name == "Ohne Kategorie");
     }
-    let mut groups = [0; 3];
+    let mut groups = [0; 4];
     for c in &playlist.categories {
         c.name.hash(&mut hash);
         c.kind.hash(&mut hash);
@@ -52,6 +52,7 @@ fn stats(playlist: &Playlist) -> Value {
             ContentKind::LiveTv => 0,
             ContentKind::Movie => 1,
             ContentKind::Series => 2,
+            ContentKind::Unclassified => 3,
         }] += 1;
     }
     json!({"channels":playlist.channels.len(),"categories":playlist.categories.len(),

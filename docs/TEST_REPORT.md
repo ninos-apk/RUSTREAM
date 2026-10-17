@@ -1,5 +1,9 @@
 # Verifizierter Entwicklungsstand
 
+Aktualisierung 0.4.1: [RUSTREAM IPTV: App-Name, Logo, TV-Banner und App-Info](BRANDING_041.md).
+
+Aktualisierung 0.4.0: [Windows-Inhaltslogik, volle Film-/Serienraster und Detailnavigation](CONTENT_LIBRARY_040.md). Der [erweiterte Plan](WINDOWS_CONTENT_LOGIK_ANALYSE_UND_PLAN.md#7-ergänzung-bibliotheksbreite-filmdetails-verlauf-und-favoriten) beschreibt zusätzlich den geplanten Ausbau für Verlauf, Favoriten und Fortsetzen.
+
 Aktualisierung 0.3.1: [UI-Umsetzung und aktuelle Prüfnachweise](UI_IMPLEMENTIERUNG_031.md) zu Startbildschirm, Videofokus, Vollbild, Refresh, beschleunigtem Spulen, Formularen und großer Systemschrift.
 
 Aktualisierung 0.2.1: [Performance-Abgleich mit Windows-Commit 7fcb083](PERFORMANCE_REVIEW.md), einschließlich Core-Synchronisierung, Media3-Live-Profilen, atomarer Telemetrie und präzisem Retry-Timer. Der folgende Bericht bleibt die historische Abnahme von 0.1.0.

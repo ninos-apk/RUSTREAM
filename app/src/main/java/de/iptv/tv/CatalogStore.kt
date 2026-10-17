@@ -9,7 +9,7 @@ import java.util.UUID
 
 /** Manifest and per-source AES keys are themselves sealed by SourceStore's Keystore key. */
 class CatalogStore(context: Context) {
-    companion object { private val startupLock=Any(); private var startupCleaned=false }
+    companion object { const val SCHEMA=2; private val startupLock=Any(); private var startupCleaned=false }
     private val manifest = SourceStore(context, "catalog-manifest.enc")
     val directory = File(context.noBackupFilesDir,"catalogs").apply { mkdirs() }
     private val entries = manifest.load()
@@ -34,15 +34,16 @@ class CatalogStore(context: Context) {
         return MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
     }
     @Synchronized fun entry(source: JSONObject): JSONObject? = entries.firstOrNull { it.optString("id") == id(source) }
-        ?.takeIf { it.optInt("schema") == 1 && safeFile(it.optString("file"))?.isFile == true }
+        ?.takeIf { it.optInt("schema") in 1..SCHEMA && safeFile(it.optString("file"))?.isFile == true }
         ?.let { JSONObject(it.toString()) }
     fun safeFile(name: String): File? = File(directory,name).takeIf { name.matches(Regex("[a-f0-9-]+\\.db")) && it.canonicalFile.parentFile == directory.canonicalFile }
     fun newFile(): File = File(directory,"${UUID.randomUUID()}.db")
     fun newKey() = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-    @Synchronized fun commit(source: JSONObject, file: File, key: String, validators: JSONObject, partial: Boolean, warnings:org.json.JSONArray=org.json.JSONArray()): JSONObject {
+    @Synchronized fun commit(source: JSONObject, file: File, key: String, validators: JSONObject, partial: Boolean, warnings:org.json.JSONArray=org.json.JSONArray(), schema:Int=SCHEMA): JSONObject {
         val id = id(source)
         val old=entries.firstOrNull { it.optString("id")==id }
-        val record = JSONObject().put("id",id).put("schema",1).put("file",file.name).put("key",key)
+        require(schema in 1..SCHEMA)
+        val record = JSONObject().put("id",id).put("schema",schema).put("file",file.name).put("key",key)
             .put("updated",System.currentTimeMillis()).put("validators",validators).put("partial",partial).put("warnings",warnings)
         old?.let{entry->
             val previous=if(entry.optString("file")==file.name)entry.optString("previous") else entry.optString("file")
