@@ -102,6 +102,51 @@ class ArtworkAndUpgradeTest {
             assertEquals(1,requests["/poster.png"]?.get())
         }finally{loader.close();socket.close();server.shutdownNow()}
     }
+    @Test fun postersScrolledAwayReturnWithoutDownloadingAgain(){
+        val original=Bitmap.createBitmap(600,900,Bitmap.Config.ARGB_8888).apply{eraseColor(android.graphics.Color.rgb(40,90,140))}
+        val bytes=ByteArrayOutputStream().also{original.compress(Bitmap.CompressFormat.PNG,90,it)}.toByteArray();original.recycle()
+        val requests=java.util.concurrent.ConcurrentHashMap<String,java.util.concurrent.atomic.AtomicInteger>()
+        val socket=ServerSocket(0);val server=Executors.newCachedThreadPool()
+        server.execute{while(!socket.isClosed){try{val client=socket.accept();server.execute{client.use{
+            client.soTimeout=5000
+            val input=client.getInputStream().bufferedReader()
+            val path=input.readLine()?.split(' ')?.getOrNull(1) ?: return@use
+            while(input.readLine()?.isNotEmpty()==true){}
+            requests.getOrPut(path){java.util.concurrent.atomic.AtomicInteger()}.incrementAndGet()
+            client.getOutputStream().use{out->out.write("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray());out.write(bytes)}
+        }}}catch(_:Exception){}}}
+        val loader=ArtworkLoader()
+        val base="http://127.0.0.1:${socket.localPort}"
+        fun loaded(view:ImageView)=view.drawable is BitmapDrawable
+        fun waitLoaded(views:List<ImageView>){
+            val deadline=SystemClock.elapsedRealtime()+20_000;var done=false
+            while(!done&&SystemClock.elapsedRealtime()<deadline){
+                instrumentation.runOnMainSync{done=views.all(::loaded)}
+                if(!done)SystemClock.sleep(50)
+            }
+            var shown=0;instrumentation.runOnMainSync{shown=views.count(::loaded)}
+            assertTrue("All posters shown: $shown/${views.size}, requests=${requests.values.sumOf{it.get()}}",done)
+        }
+        try{
+            // About 30 MiB of decoded posters: more than the former fixed 16 MiB bitmap cache.
+            val grid=mutableListOf<ImageView>()
+            for(page in 0 until 5){
+                instrumentation.runOnMainSync{repeat(12){i->val n=page*12+i
+                    grid+=ImageView(context).also{loader.bind(it,"1:$n:true"){"$base/poster-$n.jpg"}}}}
+                waitLoaded(grid.takeLast(12))
+            }
+            // Scroll back to the first rows: new holders bind the same keys again.
+            val back=mutableListOf<ImageView>()
+            instrumentation.runOnMainSync{repeat(12){n->back+=ImageView(context).also{loader.bind(it,"1:$n:true"){"$base/poster-$n.jpg"}}}}
+            waitLoaded(back)
+            assertEquals("Revisited posters are not downloaded again",(0 until 12).map{1},(0 until 12).map{requests["/poster-$it.jpg"]?.get()})
+            // An adapter refresh rebinding the same row keeps its image without a placeholder flash.
+            instrumentation.runOnMainSync{
+                val row=back.first();loader.clear();loader.bind(row,"1:0:true"){"$base/poster-0.jpg"}
+                assertTrue("Rebound row keeps its poster",loaded(row))
+            }
+        }finally{loader.close();socket.close();server.shutdownNow()}
+    }
     @Test fun schemaOneUpgradeForcesFullDownloadAndOfflineFailureRetainsCatalog():Unit=runBlocking{
         val core=Core();val loader=SourceLoader(context)
         val server=FixtureServer(byteArrayOf())

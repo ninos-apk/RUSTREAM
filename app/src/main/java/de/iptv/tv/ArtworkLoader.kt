@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
 import android.util.LruCache
@@ -33,9 +34,14 @@ class ArtworkLoader : java.io.Closeable {
     private val client=OkHttpClient.Builder().callTimeout(20,TimeUnit.SECONDS)
         .followSslRedirects(false).build()
     // Decoded images are shared by address: episodes of a series and repeated logos reuse one
-    // download, also across a catalog refresh that changes every row key.
-    private val cache=object:LruCache<String,Bitmap>(16*1024*1024){
+    // download, also across a catalog refresh that changes every row key. A fixed 16 MiB held
+    // only ~30 posters (~0.5 MiB each), so scrolling a few grid rows evicted the visible ones.
+    private val cache=object:LruCache<String,Bitmap>(memoryBudget(Runtime.getRuntime().maxMemory()/8,16,64)){
         override fun sizeOf(key:String,value:Bitmap)=value.allocationByteCount
+    }
+    // Compressed bytes are ~10x smaller: an evicted poster is decoded again, not downloaded again.
+    private val encoded=object:LruCache<String,ByteArray>(memoryBudget(Runtime.getRuntime().maxMemory()/16,8,32)){
+        override fun sizeOf(key:String,value:ByteArray)=value.size
     }
     private val addresses=LruCache<String,String>(4096)
     private val failures=LinkedHashMap<String,Long>()
@@ -69,29 +75,38 @@ class ArtworkLoader : java.io.Closeable {
         val (result,owner)=synchronized(loading){loading[address]?.let{it to false} ?: (CompletableDeferred<Bitmap?>().also{loading[address]=it} to true)}
         if(!owner)return result.await()
         var bitmap:Bitmap?=null
-        try { bitmap=download(address) }
+        try {
+            val bytes=encoded.get(address) ?: download(address)?.also{encoded.put(address,it)}
+            bitmap=bytes?.let(::decode)
+        }
         finally {
-            bitmap?.let{cache.put(address,it)} ?: fail(address)
+            // LruCache.put returns the previous entry, so it must not drive the failure branch:
+            // that marked every new image as failed and blocked it after eviction for a minute.
+            if(bitmap!=null)cache.put(address,bitmap) else fail(address)
             synchronized(loading){loading.remove(address)}
             result.complete(bitmap)
         }
         return bitmap
     }
-    private fun download(address:String):Bitmap? {
+    private fun download(address:String):ByteArray? {
         val url=address.toHttpUrlOrNull() ?: return null
         return try {
             client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 val body=response.body?.takeIf{response.isSuccessful&&it.contentLength()<=8L*1024*1024} ?: return null
                 val output=ByteArrayOutputStream()
                 body.byteStream().use { BoundedCopy.copy(it,output,8L*1024*1024) }
-                decode(output.toByteArray())
+                output.toByteArray()
             }
         } catch(_:java.io.IOException) { null } catch(_:IllegalArgumentException) { null }
     }
     fun bind(view:ImageView,key:String,address:suspend ()->String?) {
+        val shown=(view.drawable as? BitmapDrawable)?.bitmap?.takeIf{view.tag==key}
         view.tag=key
-        val bitmap=addresses.get(key)?.let{cache.get(it)}
+        val known=addresses.get(key)
+        val bitmap=known?.let{cache.get(it)}
         if(bitmap!=null){view.setImageBitmap(bitmap);return}
+        // A rebind of the same row (adapter refresh) keeps its image instead of flashing a placeholder.
+        if(shown!=null){known?.let{cache.put(it,shown)};return}
         view.setImageDrawable(ArtworkPlaceholder())
         if(failed(key))return
         synchronized(pending){
@@ -101,13 +116,14 @@ class ArtworkLoader : java.io.Closeable {
         }
         wake.trySend(Unit)
     }
-    fun clear(){cache.evictAll();addresses.evictAll()}
+    fun clear(){cache.evictAll();encoded.evictAll();addresses.evictAll()}
     // Cancelling the scope ends idle workers in receive(); closing the channel would crash them.
     override fun close(){scope.cancel();client.dispatcher.cancelAll();client.connectionPool.evictAll();client.dispatcher.executorService.shutdown();clear()}
     companion object {
         // Unreachable logo hosts hold a worker until the call timeout; two could stall every row.
         private const val WORKERS=4
         private const val MAX_PENDING=256
+        internal fun memoryBudget(bytes:Long,minMiB:Int,maxMiB:Int)=bytes.coerceIn(minMiB*1048576L,maxMiB*1048576L).toInt()
         internal fun decode(bytes:ByteArray):Bitmap? {
             val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
             BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)

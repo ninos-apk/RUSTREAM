@@ -294,6 +294,8 @@ class MainActivity : ComponentActivity() {
         }
         // A span set after layout (layout-change listener) was dropped, leaving two giant cards.
         channels.onWidthChanged={updateGridColumns()}
+        // Keep about three poster rows bound off screen; scrolling back then needs no rebind.
+        channels.setItemViewCacheSize(18)
         channels.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView,dx: Int,dy: Int) {
                 val layout=view.layoutManager as LinearLayoutManager
