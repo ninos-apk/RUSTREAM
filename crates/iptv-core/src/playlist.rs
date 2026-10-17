@@ -488,7 +488,6 @@ pub fn parse_stream(
                 name,
                 display_name: title.trim().to_owned(),
                 tvg_name: attrs.get("tvg-name").cloned().unwrap_or_default(),
-                attributes: attrs.clone(),
                 group: attrs.get("group-title").cloned().unwrap_or_default(),
                 id: attrs.get("tvg-id").cloned().unwrap_or_default(),
                 logo: attrs.get("tvg-logo").filter(|v| !v.is_empty()).cloned(),
@@ -502,6 +501,8 @@ pub fn parse_stream(
                     .filter_map(|key| attrs.get(*key))
                     .find_map(|value| kind_hint(value)),
                 headers: default_headers.clone(),
+                // Moved last: every field above reads from the map, no per-entry copy.
+                attributes: attrs,
             });
         } else if let Some(group) = text.strip_prefix("#EXTGRP:") {
             if let Some(entry) = &mut pending {
@@ -527,8 +528,10 @@ pub fn parse_stream(
             for (key, value) in url::form_urlencoded::parse(options.as_bytes()) {
                 apply_header(&mut entry.headers, &key, &value);
             }
-            let Ok(parsed) = url::Url::parse(raw_url)
-                .or_else(|error| base.map_or(Err(error), |base| base.join(raw_url)))
+            let direct = url::Url::parse(raw_url);
+            let absolute = direct.is_ok();
+            let Ok(parsed) =
+                direct.or_else(|error| base.map_or(Err(error), |base| base.join(raw_url)))
             else {
                 result.skipped += 1;
                 continue;
@@ -579,7 +582,7 @@ pub fn parse_stream(
                     name: entry.name,
                     kind,
                     category: 0,
-                    url: if url::Url::parse(raw_url).is_ok() {
+                    url: if absolute {
                         raw_url.to_owned()
                     } else {
                         parsed.to_string()
@@ -781,20 +784,26 @@ fn attributes(metadata: &str) -> HashMap<String, String> {
                 }
                 i += 1;
             }
-            let mut decoded = String::new();
-            let mut chars = metadata[begin..i].chars().peekable();
-            while let Some(c) = chars.next() {
-                if c == '\\'
-                    && chars
-                        .peek()
-                        .is_some_and(|next| *next == quote as char || *next == '\\')
-                {
-                    decoded.push(chars.next().unwrap());
-                } else {
-                    decoded.push(c);
+            let raw = &metadata[begin..i];
+            // Escapes are rare; only those values need character-wise decoding.
+            value = if raw.contains('\\') {
+                let mut decoded = String::with_capacity(raw.len());
+                let mut chars = raw.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '\\'
+                        && chars
+                            .peek()
+                            .is_some_and(|next| *next == quote as char || *next == '\\')
+                    {
+                        decoded.push(chars.next().unwrap());
+                    } else {
+                        decoded.push(c);
+                    }
                 }
-            }
-            value = decoded;
+                decoded
+            } else {
+                raw.to_owned()
+            };
             if i < bytes.len() {
                 i += 1;
             }

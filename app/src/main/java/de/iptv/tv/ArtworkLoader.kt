@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.os.SystemClock
 import android.util.LruCache
 import android.widget.ImageView
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,53 +27,87 @@ import java.io.ByteArrayOutputStream
 import java.lang.ref.WeakReference
 import java.util.concurrent.TimeUnit
 
-/** Two bounded workers. Original artwork URLs never enter logs or a disk cache. */
+/** Bounded workers. Original artwork URLs stay in memory only, never in logs or a disk cache. */
 class ArtworkLoader : java.io.Closeable {
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val client=OkHttpClient.Builder().callTimeout(20,TimeUnit.SECONDS)
         .followSslRedirects(false).build()
+    // Decoded images are shared by address: episodes of a series and repeated logos reuse one
+    // download, also across a catalog refresh that changes every row key.
     private val cache=object:LruCache<String,Bitmap>(16*1024*1024){
         override fun sizeOf(key:String,value:Bitmap)=value.allocationByteCount
     }
+    private val addresses=LruCache<String,String>(4096)
     private val failures=LinkedHashMap<String,Long>()
+    private val loading=HashMap<String,CompletableDeferred<Bitmap?>>()
     private data class Task(val view:WeakReference<ImageView>,val key:String,val address:suspend ()->String?)
-    private val queue=Channel<Task>(48)
-    init { repeat(2) { scope.launch { for(task in queue) {
-        val view=task.view.get() ?: continue
-        if(withContext(Dispatchers.Main){view.tag!=task.key})continue
-        var bitmap=cache.get(task.key)
-        if(bitmap==null) {
-            try {
-                val url=task.address()?.toHttpUrlOrNull()
-                if(url!=null) client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                    if(response.isSuccessful)response.body?.let { body ->
-                        if(body.contentLength()<=8L*1024*1024) {
-                            val output=ByteArrayOutputStream()
-                            body.byteStream().use { BoundedCopy.copy(it,output,8L*1024*1024) }
-                            bitmap=decode(output.toByteArray())
-                        }
-                    }
-                }
-            } catch(error:Exception) { if(error is kotlinx.coroutines.CancellationException)throw error }
-            bitmap?.let{cache.put(task.key,it)} ?: synchronized(failures){
-                failures[task.key]=SystemClock.elapsedRealtime()
-                while(failures.size>96)failures.remove(failures.keys.first())
-            }
+    // Newest request first and never dropped while a bound view still waits for it.
+    private val pending=ArrayDeque<Task>()
+    private val wake=Channel<Unit>(Channel.CONFLATED)
+    init { repeat(WORKERS) { scope.launch {
+        while(true) {
+            val task=synchronized(pending){pending.removeLastOrNull().also{if(pending.isNotEmpty())wake.trySend(Unit)}}
+            if(task==null){wake.receive();continue}
+            val view=task.view.get() ?: continue
+            if(withContext(Dispatchers.Main){view.tag!=task.key})continue
+            val bitmap=try {
+                (addresses.get(task.key) ?: task.address()?.also{addresses.put(task.key,it)})?.let{load(it)}
+            } catch(error:Exception) { if(error is kotlinx.coroutines.CancellationException)throw error; null }
+            if(bitmap==null)fail(task.key)
+            withContext(Dispatchers.Main){if(view.tag==task.key)bitmap?.let{view.setImageBitmap(it)}}
         }
-        withContext(Dispatchers.Main){if(view.tag==task.key)bitmap?.let{view.setImageBitmap(it)}}
-    } } } }
+    } } }
+    private fun failed(key:String)=synchronized(failures){failures[key]}?.let{SystemClock.elapsedRealtime()-it<60_000}==true
+    private fun fail(key:String)=synchronized(failures){
+        failures[key]=SystemClock.elapsedRealtime()
+        while(failures.size>96)failures.remove(failures.keys.first())
+    }
+    /** One download per address; concurrent requests for the same image wait for it. */
+    private suspend fun load(address:String):Bitmap? {
+        cache.get(address)?.let{return it}
+        if(failed(address))return null
+        val (result,owner)=synchronized(loading){loading[address]?.let{it to false} ?: (CompletableDeferred<Bitmap?>().also{loading[address]=it} to true)}
+        if(!owner)return result.await()
+        var bitmap:Bitmap?=null
+        try { bitmap=download(address) }
+        finally {
+            bitmap?.let{cache.put(address,it)} ?: fail(address)
+            synchronized(loading){loading.remove(address)}
+            result.complete(bitmap)
+        }
+        return bitmap
+    }
+    private fun download(address:String):Bitmap? {
+        val url=address.toHttpUrlOrNull() ?: return null
+        return try {
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val body=response.body?.takeIf{response.isSuccessful&&it.contentLength()<=8L*1024*1024} ?: return null
+                val output=ByteArrayOutputStream()
+                body.byteStream().use { BoundedCopy.copy(it,output,8L*1024*1024) }
+                decode(output.toByteArray())
+            }
+        } catch(_:java.io.IOException) { null } catch(_:IllegalArgumentException) { null }
+    }
     fun bind(view:ImageView,key:String,address:suspend ()->String?) {
         view.tag=key
-        val bitmap=cache.get(key)
-        if(bitmap!=null)view.setImageBitmap(bitmap) else view.setImageDrawable(ArtworkPlaceholder())
-        if(bitmap!=null)return
-        val failed=synchronized(failures){failures[key]}
-        if(failed!=null&&SystemClock.elapsedRealtime()-failed<60_000)return
-        queue.trySend(Task(WeakReference(view),key,address))
+        val bitmap=addresses.get(key)?.let{cache.get(it)}
+        if(bitmap!=null){view.setImageBitmap(bitmap);return}
+        view.setImageDrawable(ArtworkPlaceholder())
+        if(failed(key))return
+        synchronized(pending){
+            pending.addLast(Task(WeakReference(view),key,address))
+            // Only the oldest requests go; their rows have long been rebound or scrolled away.
+            while(pending.size>MAX_PENDING)pending.removeFirst()
+        }
+        wake.trySend(Unit)
     }
-    fun clear(){cache.evictAll()}
-    override fun close(){queue.close();scope.cancel();client.dispatcher.cancelAll();client.connectionPool.evictAll();client.dispatcher.executorService.shutdown();clear()}
+    fun clear(){cache.evictAll();addresses.evictAll()}
+    // Cancelling the scope ends idle workers in receive(); closing the channel would crash them.
+    override fun close(){scope.cancel();client.dispatcher.cancelAll();client.connectionPool.evictAll();client.dispatcher.executorService.shutdown();clear()}
     companion object {
+        // Unreachable logo hosts hold a worker until the call timeout; two could stall every row.
+        private const val WORKERS=4
+        private const val MAX_PENDING=256
         internal fun decode(bytes:ByteArray):Bitmap? {
             val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
             BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)

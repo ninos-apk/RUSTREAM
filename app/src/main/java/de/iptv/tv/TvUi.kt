@@ -55,12 +55,63 @@ object TvUi {
     fun focus(view: View, scale: Float = 1.035f, changed: ((Boolean) -> Unit)? = null) {
         view.isFocusable = true; view.isFocusableInTouchMode = true
         view.background = focusBackground(view.context)
+        onFocus(view, changed)
+    }
+    /** Rebinding a recycled row only replaces the callback, not the focus drawables. */
+    fun onFocus(view: View, changed: ((Boolean) -> Unit)? = null) {
         view.setOnFocusChangeListener { _, focused ->
             view.animate().cancel()
             // Dense remote navigation uses immediate static feedback, including when animations are off.
             view.scaleX = 1f; view.scaleY = 1f
             changed?.invoke(focused)
         }
+    }
+}
+
+/** Bring a focused row on screen synchronously. With the default animated scroll, a held D-pad key
+ * moves focus to rows outside the viewport; the next full layout (focused rows change height)
+ * then scraps the focused row, and Android hands focus to the first focusable view in the window.
+ */
+class TvLinearLayoutManager(context: Context) : androidx.recyclerview.widget.LinearLayoutManager(context) {
+    override fun requestChildRectangleOnScreen(parent: androidx.recyclerview.widget.RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean) =
+        super.requestChildRectangleOnScreen(parent, child, rect, true, focusedChildVisible)
+}
+class TvGridLayoutManager(context: Context, columns: Int) : androidx.recyclerview.widget.GridLayoutManager(context, columns) {
+    override fun requestChildRectangleOnScreen(parent: androidx.recyclerview.widget.RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean) =
+        super.requestChildRectangleOnScreen(parent, child, rect, true, focusedChildVisible)
+}
+
+/** Vertical D-pad focus stays inside the list; only LEFT/RIGHT (or UP above the first row) leave it.
+ * When the next row is not laid out yet, RecyclerView falls back to a window-wide focus search,
+ * which picks the nearest focusable below, e.g. in the adjacent column or the status bar.
+ */
+class TvList(context: Context) : androidx.recyclerview.widget.RecyclerView(context) {
+    /** Runs before this pass lays out children, so a new grid span applies to the same layout. */
+    var onWidthChanged: (() -> Unit)? = null
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (width != oldWidth) onWidthChanged?.invoke()
+    }
+    override fun focusSearch(focused: View?, direction: Int): View? {
+        val result = super.focusSearch(focused, direction)
+        if (direction != View.FOCUS_DOWN && direction != View.FOCUS_UP || focused == null) return result
+        val item = findContainingItemView(focused) ?: return result
+        if (result != null && result !== focused && findContainingItemView(result) != null) return result
+        val position = getChildAdapterPosition(item)
+        val count = adapter?.itemCount ?: 0
+        if (position == NO_POSITION || count == 0) return result
+        val columns = (layoutManager as? androidx.recyclerview.widget.GridLayoutManager)?.spanCount ?: 1
+        val row = position / columns
+        val down = direction == View.FOCUS_DOWN
+        // Above the first row the search field remains reachable; at the end focus stays put.
+        if (!down && row == 0) return result
+        if (down && row == (count - 1) / columns) return focused
+        val target = if (down) minOf(position + columns, count - 1) else position - columns
+        findViewHolderForAdapterPosition(target)?.itemView?.let { return it }
+        if (isComputingLayout) return focused
+        // Scrolling lays out the next row synchronously, so a fast repeat can land on it directly.
+        scrollBy(0, if (down) item.height else -item.height)
+        return findViewHolderForAdapterPosition(target)?.itemView ?: focused
     }
 }
 

@@ -262,6 +262,53 @@ fn series_deduplicate_before_paging_and_episodes_stay_bounded() {
 }
 
 #[test]
+fn series_category_browse_pages_each_category_library() {
+    let f = Fixture::new();
+    // Many shows elsewhere plus an episode-rich category: the cost the old plan multiplied.
+    let mut text = String::from("#EXTM3U\n");
+    for show in 0..200 {
+        for episode in 1..=50 {
+            text.push_str(&format!("#EXTINF:-1 group-title=\"Alpha Series\",Alpha Show {show} S01 E{episode}\nhttps://p.test/series/u/p/a-{show}-{episode}.mkv\n"));
+        }
+    }
+    for show in 0..10_000 {
+        text.push_str(&format!("#EXTINF:-1 group-title=\"Beta Series\",Beta Show {show} S01 E1\nhttps://p.test/series/u/p/b-{show}.mkv\n"));
+    }
+    let (mut e, r) = f.build(&text);
+    let categories = call(&mut e, json!({"op":"categories"}));
+    let id = |name: &str| {
+        categories["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .map(|c| (c["id"].as_u64().unwrap(), c["count"].as_u64().unwrap()))
+            .unwrap()
+    };
+    let (alpha, beta) = (id("Alpha Series"), id("Beta Series"));
+    assert_eq!((alpha.1, beta.1), (200, 10_000));
+    let page = |e: &mut Engine, category: u64, query: &str, offset: usize| {
+        call(
+            e,
+            json!({"op":"browse","revision":r,"kind":"series","category":category,"query":query,"offset":offset,"limit":64}),
+        )
+    };
+    let first = page(&mut e, alpha.0, "", 0);
+    assert_eq!(first["total"], 200);
+    assert_eq!(first["items"][0]["name"], "Alpha Show 0");
+    let last = page(&mut e, alpha.0, "", 192);
+    assert_eq!(last["items"].as_array().unwrap().len(), 8);
+    assert_eq!(last["items"][7]["name"], "Alpha Show 199");
+    assert_eq!(page(&mut e, alpha.0, "alpha series", 0)["total"], 200);
+    assert_eq!(page(&mut e, alpha.0, "beta", 0)["total"], 0);
+    assert_eq!(page(&mut e, beta.0, "", 0)["total"], 10_000);
+    assert_eq!(
+        page(&mut e, beta.0, "", 9_984)["items"][15]["name"],
+        "Beta Show 9999"
+    );
+}
+
+#[test]
 fn schema_one_remains_readable_without_mutation_for_offline_upgrade() {
     let f = Fixture::new();
     let (e, _) = f.build("#EXTM3U\n#EXTINF:-1,Legacy\nhttps://example.test/live/u/p/1.ts\n");

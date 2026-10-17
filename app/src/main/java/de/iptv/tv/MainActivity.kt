@@ -63,8 +63,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var channelEmpty: TextView
     private lateinit var channelHeading: TextView
     private lateinit var sidebar: LinearLayout
-    private lateinit var channels: RecyclerView
-    private lateinit var categories: RecyclerView
+    private lateinit var channels: TvList
+    private lateinit var categories: TvList
     private lateinit var video: PlayerView
     private lateinit var stage: FrameLayout
     private lateinit var chrome: LinearLayout
@@ -292,9 +292,8 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        channels.addOnLayoutChangeListener{_,left,_,right,_,oldLeft,_,oldRight,_->
-            if(right-left!=oldRight-oldLeft)updateGridColumns()
-        }
+        // A span set after layout (layout-change listener) was dropped, leaving two giant cards.
+        channels.onWidthChanged={updateGridColumns()}
         channels.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView,dx: Int,dy: Int) {
                 val layout=view.layoutManager as LinearLayoutManager
@@ -398,7 +397,7 @@ class MainActivity : ComponentActivity() {
         val shouldGrid=gridMode
         val wasGrid=channels.layoutManager is GridLayoutManager
         if(shouldGrid!=wasGrid){
-            channels.layoutManager=if(shouldGrid)GridLayoutManager(this,2) else LinearLayoutManager(this)
+            channels.layoutManager=if(shouldGrid)TvGridLayoutManager(this,2) else TvLinearLayoutManager(this)
             channelRows.notifyDataSetChanged()
         }
         browserColumn.layoutParams=(browserColumn.layoutParams as LinearLayout.LayoutParams).apply{
@@ -487,9 +486,15 @@ class MainActivity : ComponentActivity() {
         seriesWork?.cancel()
         if(openedSeries==null&&openedMovie==null){if(!restore)browseSnapshot=null;return}
         val generation=++searchGeneration
+        // In-flight page loads belong to the old generation and will not clear their own flags.
+        loadingPage=false;focusNextPage=false;selectNextPage=false
+        pendingPrevious=false;pendingPreviousFocus=false;pendingPreviousSelect=false
         openedSeries=null;openedMovie=null;chosenSeason=null;unknownSeason=false
         val snapshot=browseSnapshot;browseSnapshot=null
+        // Episode rows belong to the closed series; never render them as library cards.
+        if(!restore||snapshot==null){channelRows.replace(emptyList());total=0;offset=0}
         updateLibraryLayout()
+        if(restore&&snapshot==null)search()
         if(restore&&snapshot!=null){
             offset=(snapshot.index/64)*64;total=snapshot.total;channelRows.replace(emptyList())
             libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
@@ -1019,7 +1024,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun label(value: String, size: Float) = TvUi.text(this,value,size)
     private fun button(value: String, click: () -> Unit) = TvUi.button(this,value,click)
-    private fun list(adapter: Rows) = RecyclerView(this).apply { id = View.generateViewId(); layoutManager = LinearLayoutManager(this@MainActivity); this.adapter = adapter; setHasFixedSize(true); itemAnimator = null; clipToPadding=false; setPadding(dp(2),dp(2),dp(2),dp(2)) }
+    private fun list(adapter: Rows) = TvList(this).apply { id = View.generateViewId(); layoutManager = TvLinearLayoutManager(this@MainActivity); this.adapter = adapter; setHasFixedSize(true); itemAnimator = null; clipToPadding=false; setPadding(dp(2),dp(2),dp(2),dp(2)) }
     private data class Row(val id:Long,val title:String,val series:Boolean=false,val year:String="",val quality:String="",val episode:String="") {
         companion object {fun from(c:JSONObject)=Row(c.getLong("id"),c.getString("name"),c.optString("item_type")=="series",
             if(c.isNull("year"))"" else c.optString("year"),if(c.isNull("quality"))"" else c.optString("quality"),
@@ -1063,7 +1068,7 @@ class MainActivity : ComponentActivity() {
             holder.text.text="${if(active)if(channelList)"▶ " else "✓ " else ""}${if(row.episode.isNotEmpty())row.episode+" · " else ""}${row.title}"
             holder.metadata?.text=if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
             holder.root.contentDescription=row.title
-            TvUi.focus(holder.root){focused->
+            TvUi.onFocus(holder.root){focused->
                 holder.text.maxLines=if(focused)4 else 2
                 if(focused&&channelList&&holder.bindingAdapterPosition>=0){libraryFocusId=row.id;libraryFocusIndex=offset+holder.bindingAdapterPosition;libraryFocusRevision=revision}
             }
@@ -1081,6 +1086,14 @@ class MainActivity : ComponentActivity() {
                 if(key==KeyEvent.KEYCODE_INFO&&event.action==KeyEvent.ACTION_DOWN){showRowTitle(row);return@setOnKeyListener true}
                 val index=holder.bindingAdapterPosition
                 if(index<0)return@setOnKeyListener false
+                // RIGHT always enters the adjacent entry list; geometry alone skips a short list.
+                if(!channelList&&key==KeyEvent.KEYCODE_DPAD_RIGHT&&channels.isShown&&channels.childCount>0){
+                    if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0){
+                        val remembered=libraryFocusId?.let{channels.findViewHolderForItemId(it)?.itemView}
+                        (remembered ?: (0 until channels.childCount).map(channels::getChildAt).firstOrNull{it.top>=0} ?: channels.getChildAt(0)).requestFocus()
+                    }
+                    return@setOnKeyListener true
+                }
                 val columns=(channels.layoutManager as? GridLayoutManager)?.spanCount?:1
                 if(channelList&&key==KeyEvent.KEYCODE_DPAD_RIGHT&&(!holder.card||index%columns==columns-1||index==itemCount-1)){
                     if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0&&mediaColumn.visibility==View.VISIBLE){playerPane.hideControls();video.requestFocus()}

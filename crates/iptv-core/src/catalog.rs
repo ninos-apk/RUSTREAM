@@ -96,6 +96,8 @@ pub struct Writer {
     groups: HashMap<(i64, String), usize>,
     next: usize,
     counts: Vec<usize>,
+    /// Episodes of one show are usually adjacent: remember (identity, show, has artwork).
+    last_show: Option<(String, usize, bool)>,
     pub cancelled: Option<Arc<AtomicBool>>,
 }
 impl Writer {
@@ -123,6 +125,7 @@ impl Writer {
             groups: HashMap::new(),
             next: 0,
             counts: Vec::new(),
+            last_show: None,
             cancelled: None,
         })
     }
@@ -154,7 +157,7 @@ impl Writer {
                 .map_err(sql_code)?;
         }
         self.catalog
-            .insert(self.next, &channel, category, None, None, None)?;
+            .insert(self.next, &channel, category, &group, None, None, None)?;
         if channel.kind == ContentKind::Series {
             let title = channel
                 .episode
@@ -167,27 +170,42 @@ impl Writer {
                 || format!("m3u:{}", title.to_lowercase()),
                 |id| format!("xtream:{id}"),
             );
-            self.catalog
-                .db
-                .prepare_cached("INSERT OR IGNORE INTO shows VALUES(?1,?2,?3,NULL)")
-                .map_err(sql_code)?
-                .execute(params![self.next, identity, title])
-                .map_err(sql_code)?;
-            let show: usize = self
-                .catalog
-                .db
-                .prepare_cached("SELECT id FROM shows WHERE identity=?1")
-                .map_err(sql_code)?
-                .query_row([identity], |r| r.get(0))
-                .map_err(sql_code)?;
-            if channel.logo.is_some() {
+            // Same results as INSERT OR IGNORE + SELECT + UPDATE, without three statements
+            // for every episode of the show that was just written.
+            let cached = self
+                .last_show
+                .as_ref()
+                .filter(|(last, _, _)| *last == identity)
+                .map(|(_, show, artwork)| (*show, *artwork));
+            let (show, mut artwork) = match cached {
+                Some(found) => found,
+                None => {
+                    self.catalog
+                        .db
+                        .prepare_cached("INSERT OR IGNORE INTO shows VALUES(?1,?2,?3,NULL)")
+                        .map_err(sql_code)?
+                        .execute(params![self.next, identity, title])
+                        .map_err(sql_code)?;
+                    self.catalog
+                        .db
+                        .prepare_cached(
+                            "SELECT id,artwork IS NOT NULL FROM shows WHERE identity=?1",
+                        )
+                        .map_err(sql_code)?
+                        .query_row([&identity], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .map_err(sql_code)?
+                }
+            };
+            if channel.logo.is_some() && !artwork {
                 self.catalog
                     .db
                     .prepare_cached("UPDATE shows SET artwork=?2 WHERE id=?1 AND artwork IS NULL")
                     .map_err(sql_code)?
                     .execute(params![show, self.next])
                     .map_err(sql_code)?;
+                artwork = true;
             }
+            self.last_show = Some((identity, show, artwork));
             self.catalog
                 .db
                 .prepare_cached("INSERT INTO members VALUES(?1,?2,?3,?4)")
@@ -271,17 +289,20 @@ impl Catalog {
         result.channel(0)?;
         Ok(result)
     }
+    #[allow(clippy::too_many_arguments)]
     fn insert(
         &self,
         id: usize,
         c: &Channel,
         category: usize,
+        group: &str,
         parent: Option<usize>,
         season: Option<i64>,
         episode: Option<i64>,
     ) -> Result<(), String> {
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let plain = serde_json::to_vec(&json!({"url":c.url,"ua":c.headers.user_agent,"ref":c.headers.referrer,"live":c.is_live,"logo":c.logo,"display_name":c.display_name,"tvg_name":c.tvg_name,"group_title":c.group_title,"attributes":c.attributes,"url_path":c.url_path,"extension":c.extension,"episode":c.episode})).map_err(|_| "catalog_encode_failed")?;
+        let plain =
+            serde_json::to_vec(&compact_record(c, group)).map_err(|_| "catalog_encode_failed")?;
         let mut secret = nonce.to_vec();
         secret.extend(
             self.cipher
@@ -322,7 +343,7 @@ impl Catalog {
         let row = self
             .db
             .query_row(
-                if self.schema >= 2 { "SELECT name,kind,category,tvg_id,secret,series_id,year,quality FROM channels WHERE id=?1" } else { "SELECT name,kind,category,tvg_id,secret,series_id,NULL,NULL FROM channels WHERE id=?1" },
+                if self.schema >= 2 { "SELECT c.name,c.kind,c.category,c.tvg_id,c.secret,c.series_id,c.year,c.quality,g.name FROM channels c LEFT JOIN categories g ON g.id=c.category WHERE c.id=?1" } else { "SELECT c.name,c.kind,c.category,c.tvg_id,c.secret,c.series_id,NULL,NULL,g.name FROM channels c LEFT JOIN categories g ON g.id=c.category WHERE c.id=?1" },
                 [id],
                 |r| {
                     Ok((
@@ -334,6 +355,7 @@ impl Catalog {
                         r.get::<_, Option<String>>(5)?,
                         r.get::<_, Option<u16>>(6)?,
                         r.get::<_, Option<String>>(7)?,
+                        r.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -348,6 +370,20 @@ impl Catalog {
             .decrypt(Nonce::from_slice(&row.4[..12]), &row.4[12..])
             .map_err(|_| "catalog_key_failed")?;
         let v: Value = serde_json::from_slice(&plain).map_err(|_| "catalog_invalid")?;
+        if v["v"] == COMPACT_RECORD {
+            let mut channel = Channel {
+                name: row.0,
+                kind: kind_from(row.1),
+                category: row.2,
+                tvg_id: row.3,
+                series_id: row.5,
+                year: row.6,
+                quality: row.7,
+                ..Default::default()
+            };
+            expand_record(&v, &mut channel, row.8.as_deref().unwrap_or(""))?;
+            return Ok(channel);
+        }
         Ok(Channel {
             name: row.0,
             kind: kind_from(row.1),
@@ -421,6 +457,21 @@ impl Catalog {
         offset: usize,
         limit: usize,
     ) -> Result<Value, String> {
+        self.entry_page(revision, kind, category, query, offset, limit, false)
+    }
+    /// Library pages read year, quality and series flags from columns instead of decrypting
+    /// every record on the page.
+    #[allow(clippy::too_many_arguments)]
+    fn entry_page(
+        &self,
+        revision: u64,
+        kind: Option<ContentKind>,
+        category: Option<usize>,
+        query: &str,
+        offset: usize,
+        limit: usize,
+        library: bool,
+    ) -> Result<Value, String> {
         if let Some(id) = category
             && !self
                 .db
@@ -457,8 +508,22 @@ impl Catalog {
             .map_err(sql_code)?;
         values.push((limit.clamp(1, 128) as i64).into());
         values.push((offset.min(i64::MAX as usize) as i64).into());
-        let mut stmt=self.db.prepare(&format!("SELECT id,name,category,kind,series_id FROM channels WHERE {filter} ORDER BY id LIMIT ? OFFSET ?")).map_err(sql_code)?;
-        let items=stmt.query_map(rusqlite::params_from_iter(values.iter()),|r|Ok(json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,usize>(2)?,"kind":kind_key(kind_from(r.get(3)?)),"live":r.get::<_,i64>(3)?==0,"series_id":r.get::<_,Option<String>>(4)?}))).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
+        let columns = if self.schema >= 2 {
+            "year,quality"
+        } else {
+            "NULL,NULL"
+        };
+        let mut stmt=self.db.prepare(&format!("SELECT id,name,category,kind,series_id,{columns} FROM channels WHERE {filter} ORDER BY id LIMIT ? OFFSET ?")).map_err(sql_code)?;
+        let items=stmt.query_map(rusqlite::params_from_iter(values.iter()),|r|{
+            let series_id=r.get::<_,Option<String>>(4)?;
+            let mut item=json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,usize>(2)?,"kind":kind_key(kind_from(r.get(3)?)),"live":r.get::<_,i64>(3)?==0,"series_id":series_id});
+            if library {
+                item["item_type"]=json!(if series_id.is_some() {"series"} else {"entry"});
+                item["year"]=json!(r.get::<_,Option<u16>>(5)?);
+                item["quality"]=json!(r.get::<_,Option<String>>(6)?);
+            }
+            Ok(item)
+        }).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
         Ok(json!({"revision":revision,"total":count,"items":items}))
     }
     /// Library cards are grouped in SQLite before pagination; raw search stays compatible.
@@ -472,19 +537,7 @@ impl Catalog {
         limit: usize,
     ) -> Result<Value, String> {
         if self.schema == 1 || kind != Some(ContentKind::Series) {
-            let mut data = self.search(revision, kind, category, query, offset, limit)?;
-            for item in data["items"].as_array_mut().ok_or("catalog_invalid")? {
-                let id = item["id"].as_u64().ok_or("catalog_invalid")? as usize;
-                let channel = self.channel(id)?;
-                item["item_type"] = json!(if channel.series_id.is_some() {
-                    "series"
-                } else {
-                    "entry"
-                });
-                item["year"] = json!(channel.year);
-                item["quality"] = json!(channel.quality);
-            }
-            return Ok(data);
+            return self.entry_page(revision, kind, category, query, offset, limit, true);
         }
         if let Some(id) = category {
             let exists: bool = self
@@ -509,9 +562,7 @@ impl Catalog {
             filter.push_str(" AND instr(c.search_key,?)>0");
             values.push(term.to_lowercase().into());
         }
-        let from = format!(
-            "FROM shows s WHERE EXISTS(SELECT 1 FROM members m JOIN channels c ON c.id=m.channel WHERE m.show=s.id AND {filter})"
-        );
+        let from = shows_matching(&filter);
         let total: usize = self
             .db
             .query_row(
@@ -692,6 +743,16 @@ impl Catalog {
         if root.series_id.is_none() {
             return Err("not_a_series".into());
         }
+        let group: String = self
+            .db
+            .query_row(
+                "SELECT name FROM categories WHERE id=?1",
+                [root.category],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(sql_code)?
+            .unwrap_or_default();
         let file = File::open(path).map_err(|e| io_code(&e))?;
         if file.metadata().map_err(|e| io_code(&e))?.len() > 8 * 1024 * 1024 {
             return Err("series_too_large".into());
@@ -758,6 +819,7 @@ impl Catalog {
                         next,
                         &channel,
                         root.category,
+                        &group,
                         Some(parent),
                         season,
                         episode["episode_num"]
@@ -796,6 +858,122 @@ impl Catalog {
         self.db.execute_batch("COMMIT").map_err(sql_code)?;
         self.episode_page(parent, None, 0)
     }
+}
+
+/// Marks records that omit values the reader can recover. Older records stay readable as written.
+const COMPACT_RECORD: i64 = 2;
+
+fn url_parts(address: &str) -> (String, Option<String>) {
+    url::Url::parse(address)
+        .map(|url| {
+            (
+                url.path().to_owned(),
+                crate::playlist::stream_extension(&url),
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// The M3U parser's episode marker, recomputed from stored names (needs name, tvg_name, kind).
+fn derived_episode(c: &Channel) -> Option<crate::playlist::EpisodeInfo> {
+    if c.kind != ContentKind::Series {
+        return None;
+    }
+    crate::playlist::parse_episode(&c.name).or_else(|| crate::playlist::parse_episode(&c.tvg_name))
+}
+
+/// Original metadata stays lossless, but copies of the name, the category, the URL path or
+/// attribute values that are already stored as fields are not encrypted and written twice.
+fn compact_record(c: &Channel, group: &str) -> Value {
+    let mut record = json!({"v":COMPACT_RECORD,"url":c.url,"ua":c.headers.user_agent,"ref":c.headers.referrer,"live":c.is_live,"logo":c.logo});
+    if c.episode != derived_episode(c) {
+        record["episode"] = json!(c.episode);
+    }
+    if c.display_name != c.name {
+        record["display_name"] = json!(c.display_name);
+    }
+    if c.tvg_name != c.name {
+        record["tvg_name"] = json!(c.tvg_name);
+    }
+    if c.group_title != group {
+        record["group_title"] = json!(c.group_title);
+    }
+    if (c.url_path.clone(), c.extension.clone()) != url_parts(&c.url) {
+        record["url_path"] = json!(c.url_path);
+        record["extension"] = json!(c.extension);
+    }
+    if !c.attributes.is_empty() {
+        let attributes = c
+            .attributes
+            .iter()
+            .map(|(key, value)| {
+                let field = match key.as_str() {
+                    "tvg-logo" => c.logo.as_deref(),
+                    "tvg-name" => Some(c.tvg_name.as_str()),
+                    "group-title" => Some(c.group_title.as_str()),
+                    "tvg-id" => Some(c.tvg_id.as_str()),
+                    _ => None,
+                };
+                let value = if field == Some(value.as_str()) {
+                    Value::Null
+                } else {
+                    json!(value)
+                };
+                (key.clone(), value)
+            })
+            .collect();
+        record["attributes"] = Value::Object(attributes);
+    }
+    record
+}
+
+fn expand_record(v: &Value, c: &mut Channel, group: &str) -> Result<(), String> {
+    c.url = v["url"].as_str().ok_or("catalog_invalid")?.into();
+    c.headers = StreamHeaders {
+        user_agent: v["ua"].as_str().map(str::to_owned),
+        referrer: v["ref"].as_str().map(str::to_owned),
+    };
+    c.logo = v["logo"].as_str().map(str::to_owned);
+    c.is_live = v["live"].as_bool().unwrap_or(false);
+    c.display_name = v["display_name"].as_str().unwrap_or(&c.name).into();
+    c.tvg_name = v["tvg_name"].as_str().unwrap_or(&c.name).into();
+    c.episode = match v.get("episode") {
+        Some(episode) => serde_json::from_value(episode.clone()).ok(),
+        None => derived_episode(c),
+    };
+    c.group_title = v["group_title"].as_str().unwrap_or(group).into();
+    (c.url_path, c.extension) = if v.get("url_path").is_some() {
+        (
+            v["url_path"].as_str().unwrap_or("").into(),
+            v["extension"].as_str().map(str::to_owned),
+        )
+    } else {
+        url_parts(&c.url)
+    };
+    if let Some(attributes) = v["attributes"].as_object() {
+        for (key, value) in attributes {
+            let value = match value.as_str() {
+                Some(text) => text.to_owned(),
+                None => match key.as_str() {
+                    "tvg-logo" => c.logo.clone().ok_or("catalog_invalid")?,
+                    "tvg-name" => c.tvg_name.clone(),
+                    "group-title" => c.group_title.clone(),
+                    "tvg-id" => c.tvg_id.clone(),
+                    _ => return Err("catalog_invalid".into()),
+                },
+            };
+            c.attributes.insert(key.clone(), value);
+        }
+    }
+    Ok(())
+}
+
+/// Collect matching shows once from the filtered channels. A correlated EXISTS per show
+/// rescanned the whole category for every show and blocked the serial core for minutes.
+fn shows_matching(filter: &str) -> String {
+    format!(
+        "FROM shows s WHERE s.id IN (SELECT m.show FROM channels c JOIN members m ON m.channel=c.id WHERE {filter})"
+    )
 }
 
 pub fn build_m3u(
@@ -866,5 +1044,180 @@ pub fn build_m3u(
     match result {
         Ok(v) => Ok(v),
         Err(e) => Err(sink_error.unwrap_or_else(|| io_code(&e))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn writer(name: &str) -> (std::path::PathBuf, Writer) {
+        let path = std::env::temp_dir().join(format!("catalog-{name}-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let writer = Writer::create(&path.to_string_lossy(), &"11".repeat(32)).unwrap();
+        (path, writer)
+    }
+    fn assert_same(expected: &Channel, actual: &Channel) {
+        assert_eq!(expected.name, actual.name);
+        assert!(expected.url == actual.url, "url differs");
+        assert_eq!(expected.logo, actual.logo);
+        assert_eq!(expected.tvg_id, actual.tvg_id);
+        assert!(expected.headers == actual.headers, "headers differ");
+        assert_eq!(expected.is_live, actual.is_live);
+        assert_eq!(expected.display_name, actual.display_name);
+        assert_eq!(expected.tvg_name, actual.tvg_name);
+        assert_eq!(expected.group_title, actual.group_title);
+        assert_eq!(expected.attributes, actual.attributes);
+        assert_eq!(expected.url_path, actual.url_path);
+        assert_eq!(expected.extension, actual.extension);
+        assert_eq!(expected.episode, actual.episode);
+    }
+
+    #[test]
+    fn compact_records_restore_derived_and_differing_fields() {
+        let (path, mut writer) = writer("compact");
+        let name = "Show S01 E02".to_owned();
+        let url = "https://p.test/series/u/p/2.mkv".to_owned();
+        let derived = Channel {
+            kind: ContentKind::Series,
+            display_name: name.clone(),
+            tvg_name: name.clone(),
+            group_title: "Group".into(),
+            logo: Some("https://img.test/a.png".into()),
+            tvg_id: "id.1".into(),
+            attributes: [
+                ("tvg-logo", "https://img.test/a.png"),
+                ("tvg-name", name.as_str()),
+                ("group-title", "Group"),
+                ("tvg-id", "id.1"),
+                ("custom", "kept"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect(),
+            url_path: "/series/u/p/2.mkv".into(),
+            extension: Some("mkv".into()),
+            episode: crate::playlist::parse_episode(&name),
+            name: name.clone(),
+            url: url.clone(),
+            ..Default::default()
+        };
+        // Every value differs from what the reader could derive.
+        let differing = Channel {
+            display_name: "Display".into(),
+            tvg_name: "Other".into(),
+            group_title: " Group ".into(),
+            logo: None,
+            attributes: [("tvg-logo", ""), ("tvg-name", "x"), ("group-title", "")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+            url_path: String::new(),
+            extension: None,
+            episode: None,
+            headers: StreamHeaders {
+                user_agent: Some("UA".into()),
+                referrer: Some("https://ref.test/".into()),
+            },
+            ..derived.clone()
+        };
+        let record = compact_record(&derived, "Group");
+        for omitted in [
+            "display_name",
+            "tvg_name",
+            "group_title",
+            "url_path",
+            "episode",
+        ] {
+            assert!(record.get(omitted).is_none(), "{omitted} stored twice");
+        }
+        assert_eq!(record["attributes"]["tvg-logo"], Value::Null);
+        assert_eq!(record["attributes"]["custom"], "kept");
+        writer.add(derived.clone(), "Group".into()).unwrap();
+        writer.add(differing.clone(), "Group".into()).unwrap();
+        let catalog = writer.finish(0).unwrap();
+        assert_same(&derived, &catalog.channel(0).unwrap());
+        assert_same(&differing, &catalog.channel(1).unwrap());
+        drop(catalog);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn full_records_written_before_compaction_stay_readable() {
+        let (path, mut writer) = writer("legacy");
+        writer
+            .add(
+                Channel {
+                    name: "Legacy".into(),
+                    url: "https://p.test/live/u/p/1.ts".into(),
+                    ..Default::default()
+                },
+                "Group".into(),
+            )
+            .unwrap();
+        let catalog = writer.finish(0).unwrap();
+        let plain = json!({"url":"https://p.test/live/u/p/1.ts","ua":null,"ref":null,"live":true,"logo":"https://img.test/l.png","display_name":"","tvg_name":"T","group_title":"G","attributes":{"tvg-logo":"https://img.test/l.png"},"url_path":"/stored","extension":null,"episode":null});
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let mut secret = nonce.to_vec();
+        secret.extend(
+            catalog
+                .cipher
+                .encrypt(&nonce, serde_json::to_vec(&plain).unwrap().as_slice())
+                .unwrap(),
+        );
+        catalog
+            .db
+            .execute("UPDATE channels SET secret=?1 WHERE id=0", [secret])
+            .unwrap();
+        let channel = catalog.channel(0).unwrap();
+        assert_eq!(channel.display_name, "");
+        assert_eq!(channel.tvg_name, "T");
+        assert_eq!(channel.group_title, "G");
+        assert_eq!(channel.url_path, "/stored");
+        assert_eq!(channel.extension, None);
+        assert_eq!(channel.attributes["tvg-logo"], "https://img.test/l.png");
+        assert!(channel.is_live);
+        drop(catalog);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn series_library_query_has_no_per_show_subquery() {
+        let path = std::env::temp_dir().join(format!("plan-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut writer = Writer::create(&path.to_string_lossy(), &"11".repeat(32)).unwrap();
+        for (index, group) in ["Alpha", "Beta"].into_iter().enumerate() {
+            for episode in 1..=3 {
+                let name = format!("{group} S01 E{episode}");
+                let channel = Channel {
+                    url: format!("https://p.test/series/u/p/{index}{episode}.mkv"),
+                    kind: ContentKind::Series,
+                    episode: crate::playlist::parse_episode(&name),
+                    search_key: name.to_lowercase(),
+                    name,
+                    ..Default::default()
+                };
+                writer.add(channel, group.into()).unwrap();
+            }
+        }
+        let catalog = writer.finish(0).unwrap();
+        let filter = "c.kind=2 AND c.category=? AND instr(c.search_key,?)>0";
+        let plan: Vec<String> = catalog
+            .db
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN SELECT s.id {}",
+                shows_matching(filter)
+            ))
+            .unwrap()
+            .query_map(params![0, "alpha"], |r| r.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            !plan.iter().any(|step| step.contains("CORRELATED")),
+            "{plan:?}"
+        );
+        drop(catalog);
+        let _ = std::fs::remove_file(&path);
     }
 }

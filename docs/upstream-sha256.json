@@ -1,9 +1,9 @@
 [
   {
     "path": "src/playlist.rs",
-    "sha256": "547483AD0CC0EC99F7897B20F75BFCA9CE4AA22D8F70A3D2837E73259A873BF2",
+    "sha256": "1CECB072CB76B660C3AC5A1217A1777163F523D52A462E4D42D34C62B18CA21A",
     "upstream_sha256": "90D4AD9A6502CE55D56984D7C5915797CF2534E0EACBDE0D778FEEAD020F29BC",
-    "adaptation": "Windows 17dd21f content classification and episode parsing, Android streaming sink and catalog 0.4.0"
+    "adaptation": "Windows 17dd21f content classification and episode parsing, Android streaming sink and catalog 0.4.0; import fast path without attribute-map copy, second URL parse or unescaped value decoding (output unchanged)"
   },
   {
     "path": "src/recovery.rs",

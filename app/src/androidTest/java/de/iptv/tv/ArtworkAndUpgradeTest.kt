@@ -58,6 +58,50 @@ class ArtworkAndUpgradeTest {
             }
         }finally{loader.close();socket.close();server.shutdownNow()}
     }
+    @Test fun sharedImagesDownloadOnceAndBurstsAreNeverDropped(){
+        val original=Bitmap.createBitmap(12,18,Bitmap.Config.ARGB_8888)
+        val bytes=ByteArrayOutputStream().also{original.compress(Bitmap.CompressFormat.PNG,90,it)}.toByteArray();original.recycle()
+        val requests=java.util.concurrent.ConcurrentHashMap<String,java.util.concurrent.atomic.AtomicInteger>()
+        val socket=ServerSocket(0);val server=Executors.newCachedThreadPool()
+        server.execute{while(!socket.isClosed){try{val client=socket.accept();server.execute{client.use{
+            client.soTimeout=5000
+            val input=client.getInputStream().bufferedReader()
+            val path=input.readLine()?.split(' ')?.getOrNull(1) ?: return@use
+            while(input.readLine()?.isNotEmpty()==true){}
+            requests.getOrPut(path){java.util.concurrent.atomic.AtomicInteger()}.incrementAndGet()
+            SystemClock.sleep(30)
+            client.getOutputStream().use{out->out.write("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray());out.write(bytes)}
+        }}}catch(_:Exception){}}}
+        val loader=ArtworkLoader()
+        val base="http://127.0.0.1:${socket.localPort}"
+        // Episode rows: distinct row keys sharing one poster address.
+        val episodes=mutableListOf<ImageView>()
+        // A fast scroll: more simultaneous rows than the former 48-entry queue accepted.
+        val burst=mutableListOf<ImageView>()
+        fun loaded(view:ImageView)=(view.drawable as? BitmapDrawable)?.bitmap?.width==12
+        try{
+            instrumentation.runOnMainSync{
+                repeat(30){i->episodes+=ImageView(context).also{loader.bind(it,"1:$i:false"){"$base/poster.png"}}}
+                repeat(120){i->burst+=ImageView(context).also{loader.bind(it,"1:${1000+i}:false"){"$base/logo-$i.png"}}}
+            }
+            val deadline=SystemClock.elapsedRealtime()+20_000;var done=false
+            while(!done&&SystemClock.elapsedRealtime()<deadline){
+                instrumentation.runOnMainSync{done=(episodes+burst).all(::loaded)}
+                if(!done)SystemClock.sleep(50)
+            }
+            instrumentation.runOnMainSync{
+                assertEquals("Every episode row shows the shared poster",30,episodes.count(::loaded))
+                assertEquals("No request of a burst is dropped",120,burst.count(::loaded))
+            }
+            assertEquals("The shared poster is downloaded once",1,requests["/poster.png"]?.get())
+            // Rebinding a row after a catalog refresh reuses the decoded image without a request.
+            instrumentation.runOnMainSync{
+                val view=ImageView(context);loader.bind(view,"2:0:false"){"$base/poster.png"}
+            }
+            SystemClock.sleep(500)
+            assertEquals(1,requests["/poster.png"]?.get())
+        }finally{loader.close();socket.close();server.shutdownNow()}
+    }
     @Test fun schemaOneUpgradeForcesFullDownloadAndOfflineFailureRetainsCatalog():Unit=runBlocking{
         val core=Core();val loader=SourceLoader(context)
         val server=FixtureServer(byteArrayOf())
