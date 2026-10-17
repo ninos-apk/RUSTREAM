@@ -71,6 +71,14 @@ Die Geräte-Tests verwenden ausschließlich ein synthetisches Video und einen lo
 
 `test-release.ps1` prüft die R8-optimierte App mit einer separaten Debug-Testsignatur ausschließlich auf einem Emulator. Dabei werden dessen IPTV-App-Daten zurückgesetzt. Der Test startet einen lokalen synthetischen Anbieter auf Port 18888 und beendet ihn danach. Der unveränderte Publisher-AAB bleibt unsigniert. `scripts/verify-package.ps1` prüft 16-KB-Ausrichtung und JNI-Symbole; `scripts/package-source.ps1` erzeugt ein Quellarchiv ohne lokale Tools, Zugangsdaten oder Schlüssel.
 
+Der opt-in-Test `UiPreviewTest` (lokaler Import, Filmdetails, Vollbild und Spulen mit echtem Decoder) läuft mit einem Befehl:
+
+```powershell
+./scripts/test-ui-preview.ps1
+```
+
+Das Skript baut und installiert App und Test-APK (`-SkipBuild` überspringt das) und erzeugt mit ffmpeg einen fünfminütigen synthetischen Film unter `artifacts/ui-preview/`. ffmpeg kommt aus `../IPTV Player/.tools/ffmpeg`, aus dem `PATH` oder über `-Ffmpeg`. Danach startet es `scripts/UiDemoServer.java` auf `127.0.0.1:18891` (140 Sender, ein Film und eine Episode; die Playlist antwortet nach 3,5 s), setzt `adb reverse` und führt nur diesen Test aus. Ohne `-e uiDemoUrl` überspringt der Test sich per Assumption, und `am instrument` meldet trotzdem „OK (1 test)“. Das Skript verlangt deshalb den Teststatus 0 und schlägt sonst fehl. Server und `adb reverse` werden immer beendet. Der Test leert Quellen und Nutzerbibliothek vorübergehend und stellt beide danach wieder her. Ausgabe, Screenshots und Server-Log liegen unter `artifacts/ui-preview/`. `test-device.ps1` überspringt diesen Test.
+
 Eine private Liste wird separat getestet:
 
 ```powershell

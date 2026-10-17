@@ -45,7 +45,7 @@ Getestet auf einem eigens angelegten Google-TV-Emulator API 36, 1920 × 1080, 32
 | Native Pakete | APK-ZIP-Ausrichtung und ELF-LOAD-Ausrichtung mindestens 16 KiB sowie JNI-Exporte für ARM64, ARMv7 und x86_64 geprüft. `artifacts/ui-implementation/package-check.log`. |
 | Testdaten | Test-APK enthält ausschließlich das freigegebene synthetische Video; keine privaten Anbieterlisten. `artifacts/ui-implementation/private-assets-check.log`. |
 
-Die Zusatzprüfung mit echtem Decoder ist absichtlich opt-in und benötigt einen lokalen Anbieter sowie einen leeren Test-App-Zustand. Der Test hinterlässt die synthetische Quelle für die Sichtprüfung. Der reguläre Geräte-Testbestand benötigt diesen Demo-Server nicht.
+Die Zusatzprüfung mit echtem Decoder ist absichtlich opt-in und benötigt einen lokalen Anbieter sowie einen leeren Test-App-Zustand. Der Test hinterlässt die synthetische Quelle für die Sichtprüfung. Der reguläre Geräte-Testbestand benötigt diesen Demo-Server nicht. Nachtrag: Inzwischen startet `scripts/test-ui-preview.ps1` den Anbieter und führt den Test mit einem Befehl aus. Der Test leert Quellen und Nutzerbibliothek selbst und stellt beide danach wieder her (siehe README, Abschnitt Tests).
 
 ## Dateien und Abnahmegrenzen
 
