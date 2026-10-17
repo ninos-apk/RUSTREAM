@@ -53,10 +53,10 @@ try {
             $subtitleFont=[System.Drawing.Font]::new('Segoe UI',[single](11*$scale),[System.Drawing.FontStyle]::Regular,[System.Drawing.GraphicsUnit]::Pixel)
             try {
                 $g.DrawString('RUSTREAM',$titleFont,$titleBrush,[single](181*$scale),[single](51*$scale))
-                $g.DrawString('IPTV',$titleFont,$titleBrush,[single](181*$scale),[single](77*$scale))
+                $g.DrawString('IPTV PLAYER',$titleFont,$titleBrush,[single](181*$scale),[single](77*$scale))
                 $g.DrawString('Powered by Rust',$subtitleFont,$subtitleBrush,[single](182*$scale),[single](113*$scale))
             } finally { $titleBrush.Dispose(); $subtitleBrush.Dispose(); $titleFont.Dispose(); $subtitleFont.Dispose() }
         }
     }
 } finally { $logo.Dispose() }
-Write-Host 'RUSTREAM IPTV launcher icons, TV banners and in-app logo exported.'
+Write-Host 'RUSTREAM IPTV PLAYER launcher icons, TV banners and in-app logo exported.'

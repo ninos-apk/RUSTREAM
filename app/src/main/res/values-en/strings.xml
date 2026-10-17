@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_description">RUSTREAM IPTV is an IPTV player built around a core written in Rust. It focuses on high performance and smooth streaming – especially for live sports and football.</string>
+    <string name="app_description">RUSTREAM IPTV PLAYER is an IPTV player built around a core written in Rust. It focuses on high performance and smooth streaming – especially for live sports and football.</string>
     <string name="app_info">App info</string>
     <string name="app_version">Version %1$s</string>
 

@@ -21,7 +21,7 @@ class BrandingTest {
     @Test fun installedMetadataStartupAndAboutUseRustreamBranding(){
         val manager=context.packageManager
         val application=manager.getApplicationInfo(context.packageName,0)
-        assertEquals("RUSTREAM IPTV",manager.getApplicationLabel(application).toString())
+        assertEquals("RUSTREAM IPTV PLAYER",manager.getApplicationLabel(application).toString())
         assertEquals(context.getString(R.string.app_description),application.loadDescription(manager).toString())
         assertNotNull("Installed application icon",application.loadIcon(manager))
         val banner=application.loadBanner(manager)
@@ -33,7 +33,7 @@ class BrandingTest {
         try{
             store.save(emptyList())
             withTvActivity{
-                assertTrue(device.wait(Until.hasObject(By.text("RUSTREAM IPTV")),15_000))
+                assertTrue(device.wait(Until.hasObject(By.text("RUSTREAM IPTV PLAYER")),15_000))
                 assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
                 device.executeShellCommand("screencap -p /sdcard/Download/rustream-startup.png")
                 device.pressDPadCenter()
@@ -52,7 +52,7 @@ class BrandingTest {
                 device.pressBack()
             }
             context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            assertTrue("Android shows the installed app name",device.wait(Until.hasObject(By.text("RUSTREAM IPTV")),10_000))
+            assertTrue("Android shows the installed app name",device.wait(Until.hasObject(By.text("RUSTREAM IPTV PLAYER")),10_000))
             device.executeShellCommand("screencap -p /sdcard/Download/rustream-installed-info.png")
             device.pressBack()
         }finally{store.save(previous)}

@@ -1,10 +1,10 @@
-# RUSTREAM IPTV · Branding 0.4.1
+# RUSTREAM IPTV PLAYER · Branding
 
-Der App-Name lautet **RUSTREAM IPTV**. Das Manifest referenziert zentrale String-Ressourcen für Name und Beschreibung. Dadurch verwenden Installer und Android-System den neuen Namen. Die Paket-ID `de.iptv.tv` bleibt für Updates vorhandener Installationen erhalten; VersionCode 9 / VersionName 0.4.1.
+Der App-Name lautet seit dem Update vom 17. Oktober 2026 **RUSTREAM IPTV PLAYER**. Das Manifest referenziert zentrale String-Ressourcen für Name und Beschreibung. Dadurch verwenden Installer und Android-System den neuen Namen; Startseite, App-Info und TV-Banner verwenden ebenfalls den vollständigen Namen. Die Paket-ID `de.iptv.tv` bleibt für Updates vorhandener Installationen erhalten. Die ursprüngliche Branding-Version war VersionCode 9 / VersionName 0.4.1.
 
 Beschreibung unter **Einstellungen → App-Info**:
 
-> RUSTREAM IPTV ist ein IPTV-Player mit einem in Rust entwickelten Core. Der Fokus liegt auf hoher Performance und einem flüssigen Streaming-Erlebnis – besonders bei Live-Sport und Fußball.
+> RUSTREAM IPTV PLAYER ist ein IPTV-Player mit einem in Rust entwickelten Core. Der Fokus liegt auf hoher Performance und einem flüssigen Streaming-Erlebnis – besonders bei Live-Sport und Fußball.
 
 Unter der Version steht **developed by Ninos Oshana**. Startbildschirm und Toolbar verwenden ebenfalls die neue Marke.
 
