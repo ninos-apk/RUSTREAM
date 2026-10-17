@@ -9,10 +9,12 @@ import java.util.UUID
 
 /** Manifest and per-source AES keys are themselves sealed by SourceStore's Keystore key. */
 class CatalogStore(context: Context) {
-    companion object { const val SCHEMA=2; private val startupLock=Any(); private var startupCleaned=false }
+    companion object { const val SCHEMA=3; private val startupLock=Any(); private var startupCleaned=false }
     private val manifest = SourceStore(context, "catalog-manifest.enc")
     val directory = File(context.noBackupFilesDir,"catalogs").apply { mkdirs() }
     private val entries = manifest.load()
+    /** Salts for sources whose first keyed generation is still being built. */
+    private val pendingSalts = mutableMapOf<String,String>()
     init {
         synchronized(startupLock){
             if(!startupCleaned){
@@ -39,19 +41,26 @@ class CatalogStore(context: Context) {
     fun safeFile(name: String): File? = File(directory,name).takeIf { name.matches(Regex("[a-f0-9-]+\\.db")) && it.canonicalFile.parentFile == directory.canonicalFile }
     fun newFile(): File = File(directory,"${UUID.randomUUID()}.db")
     fun newKey() = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-    @Synchronized fun commit(source: JSONObject, file: File, key: String, validators: JSONObject, partial: Boolean, warnings:org.json.JSONArray=org.json.JSONArray(), schema:Int=SCHEMA): JSONObject {
+    /** Content keys of history and favourites depend on this salt, so it outlives every generation. */
+    @Synchronized fun salt(source: JSONObject): String {
+        val id=id(source)
+        return entries.firstOrNull { it.optString("id")==id }?.optString("salt")?.takeIf { it.length==64 }
+            ?: pendingSalts.getOrPut(id) { newKey() }
+    }
+    @Synchronized fun commit(source: JSONObject, file: File, key: String, validators: JSONObject, partial: Boolean, warnings:org.json.JSONArray=org.json.JSONArray(), schema:Int=SCHEMA, salt:String?=null): JSONObject {
         val id = id(source)
         val old=entries.firstOrNull { it.optString("id")==id }
         require(schema in 1..SCHEMA)
         val record = JSONObject().put("id",id).put("schema",schema).put("file",file.name).put("key",key)
             .put("updated",System.currentTimeMillis()).put("validators",validators).put("partial",partial).put("warnings",warnings)
+        (salt ?: old?.optString("salt")?.takeIf { it.isNotEmpty() })?.let { record.put("salt",it) }
         old?.let{entry->
             val previous=if(entry.optString("file")==file.name)entry.optString("previous") else entry.optString("file")
             if(previous.isNotEmpty())record.put("previous",previous)
         }
         val updated = entries.filter { it.optString("id") != id } + record
         manifest.save(updated)
-        entries.clear(); entries.addAll(updated)
+        entries.clear(); entries.addAll(updated); pendingSalts.remove(id)
         cleanup(listOfNotNull(old?.optString("file"),old?.optString("previous")))
         return record
     }

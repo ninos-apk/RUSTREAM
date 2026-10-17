@@ -1,5 +1,9 @@
 # Plattformanalyse und Architektur
 
+## Benutzerbibliothek 0.4.2
+
+„Zuletzt gesehen“, Favoriten und Fortsetzen für Live, Movies und Series. Katalog-Schema 3 speichert pro Eintrag einen gesalzenen, über Neuimporte stabilen Inhaltsschlüssel (`ukey`, indiziert). Serien verwenden ihre Show-Identität. `resolve` bildet gespeicherte Schlüssel begrenzt auf die aktuelle Revision ab, und `select` nimmt eine Fortsetzungsposition an. Benutzerdaten liegen getrennt von den Kataloggenerationen in `user-library.enc` (Keystore, AtomicFile) und werden von einem einzigen IO-Writer gebündelt geschrieben. Player-Ereignisse kommen aus dem bestehenden Sekundenticker und sind an die jeweilige Auswahl gebunden. Details: [Benutzerbibliothek 0.4.2](USER_LIBRARY_042.md).
+
 ## Inhaltsbibliothek 0.4.0
 
 Schema 2 ergänzt persistente Serienidentitäten und Episodenmitgliedschaften, Originalmetadaten sowie Jahr/Qualität. `browse` dedupliziert Serien vor dem Paging; `series_page` liefert begrenzte Staffel-/Episodenseiten. M3U-Titelgruppierung und Xtream-Anbieteridentitäten bleiben unterscheidbar. `search` bleibt die rohe Eintragsabfrage. Schema 1 ist im Offline-Übergang lesbar; die vollständige Neuklassifikation benötigt einen erneuten Quellenimport ohne alte HTTP-Validatoren. Der gemeinsame Media3-Player bleibt unabhängig vom Browserzustand; Channel-Tasten navigieren im tatsächlichen Wiedergabekontext. Architektur, Budgets und Upgrade: [Filme und Serien 0.4.0](CONTENT_LIBRARY_040.md).

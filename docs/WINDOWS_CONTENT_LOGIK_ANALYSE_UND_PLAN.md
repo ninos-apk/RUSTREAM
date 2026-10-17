@@ -262,4 +262,4 @@ Reihenfolge: stabile Katalogschlüssel und Auflösung → typisierter atomarer S
 | TV/UI | D-Pad, Sterne ohne versehentlichen Start, Rücksprungfokus, leere Listen, lange arabische Titel, doppelte Schriftgröße, Screenshots aller Spezialkategorien |
 | Abschluss | Rust-/JVM-/Emulatortests, Lint, Debug- und R8-Release-Build/APK/AAB sowie Paket-/Datenschutzprüfung wiederholen |
 
-Diese Erweiterung ist geplant; sie wird im aktuellen 0.4.0-Prüfbericht ausdrücklich nicht als bereits implementiert ausgegeben.
+Umgesetzt in 0.4.2: [Zuletzt gesehen, Favoriten und Fortsetzen](USER_LIBRARY_042.md). Abweichungen von diesem Plan stehen dort: Die Verlaufslänge ist einstellbar (Standard 15). Der Stern ist auf TV über Details, Player-Controls und langes OK bedienbar statt als zweites Fokusziel pro Karte. Benutzerdaten werden pro Quelle gespeichert und beim Entfernen der Quelle mit gelöscht.

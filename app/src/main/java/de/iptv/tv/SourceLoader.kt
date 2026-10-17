@@ -148,13 +148,14 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
             } else {
                 val file=catalogs.newFile();target=file
                 val key=catalogs.newKey()
+                val salt=catalogs.salt(source)
                 val parsed=Core().use { worker -> worker.call("build_catalog","path" to temporary.absolutePath,"base" to base,
-                    "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream")) }
+                    "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream"),"salt" to salt) }
                 report.put("parse_ms",parsed.getDouble("import_ms"))
                 stage="commit_catalog";progress("Katalog wird geöffnet …")
                 check(parsed.getInt("schema")==CatalogStore.SCHEMA){"catalog_incompatible"}
                 Core().use { checkCore -> checkCore.call("open_catalog","path" to file.absolutePath,"key" to key) }
-                catalogs.commit(source,file,key,validators,warnings.length()>0,warnings,parsed.getInt("schema"))
+                catalogs.commit(source,file,key,validators,warnings.length()>0,warnings,parsed.getInt("schema"),salt)
                 target=null
                 result=if(activate)core.call("open_catalog","path" to file.absolutePath,"key" to key)
                     .put("import_ms",parsed.getDouble("import_ms")) else parsed

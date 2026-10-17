@@ -84,6 +84,8 @@ class PlayerPane(
     private var statusText = ""
     private var guideText = ""
     var hasSelection = false
+    /** Null while the current item has no stable key (older catalog, unclassified entry). */
+    private var favorite: Boolean? = null
     var isFullscreen = false; private set
     val controlsVisible get() = overlay.visibility == View.VISIBLE
     val seeking get() = hold.active
@@ -103,7 +105,8 @@ class PlayerPane(
         val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; clipChildren = false; clipToPadding = false }
         for ((key, symbol, label) in listOf(
             Triple("back", "back", "30 Sekunden zurück"), Triple("play", "play", "Wiedergabe starten"),
-            Triple("forward", "forward", "30 Sekunden vor"), Triple("stop", "stop", "Stopp"), Triple("fullscreen", "fullscreen", "Vollbild")
+            Triple("forward", "forward", "30 Sekunden vor"), Triple("stop", "stop", "Stopp"), Triple("fullscreen", "fullscreen", "Vollbild"),
+            Triple("favorite", "star", "Zu Favoriten hinzufügen")
         )) {
             val button = TvIconButton(context, symbol, label) { touch(); cancelSeek(); action(key) }.apply { id = View.generateViewId() }
             TvUi.focus(button, 1f) { focused -> if (focused) { caption.text = button.contentDescription; touch() } }
@@ -131,6 +134,18 @@ class PlayerPane(
         addView(outline, LayoutParams(-1, -1))
         video.setOnClickListener { if (isFullscreen) showControls(true) else if (hasSelection) action("fullscreen") else action("library") }
     }
+    /** Shows the favourite state of what is playing (for an episode: its show). */
+    fun setFavorite(active: Boolean?) {
+        favorite = active
+        buttons.getValue("favorite").apply {
+            val wanted = if (active == true) "star_on" else "star"
+            if (symbol != wanted) { symbol = wanted; invalidate() }
+            contentDescription = if (active == true) "Aus Favoriten entfernen" else "Zu Favoriten hinzufügen"
+            val available = hasSelection && active != null
+            isEnabled = available; isFocusable = available
+            if (hasFocus()) caption.text = contentDescription
+        }
+    }
     fun updateInformation(status: String, guide: String = guideText) {
         statusText = status; guideText = guide; updateInfo()
     }
@@ -154,6 +169,7 @@ class PlayerPane(
         play.isEnabled = hasSelection
         buttons.getValue("stop").isEnabled = video.player != null
         for (key in listOf("back", "forward")) buttons.getValue(key).apply { isEnabled = stats.seekable; isFocusable = stats.seekable }
+        buttons.getValue("favorite").apply { val available = hasSelection && favorite != null; isEnabled = available; isFocusable = available }
         if (buttons.values.any { !it.isEnabled && it.hasFocus() }) play.requestFocus()
         if (seeking && (!stats.seekable || stats.live || !hasSelection)) cancelSeek()
         if (!seeking) updateTimeline(stats.positionMs)

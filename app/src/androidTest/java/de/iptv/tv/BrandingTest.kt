@@ -40,7 +40,7 @@ class BrandingTest {
                 assertTrue(device.wait(Until.hasObject(By.text("Einstellungen")),5_000))
                 assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
                 // Remote navigation scrolls the existing settings menu down to its final action.
-                repeat(8){device.pressDPadDown()}
+                repeat(9){device.pressDPadDown()}
                 assertTrue(device.wait(Until.hasObject(By.text("App-Info").focused(true)),5_000))
                 device.pressDPadCenter()
                 assertTrue(device.wait(Until.hasObject(By.text(context.getString(R.string.app_description))),5_000))

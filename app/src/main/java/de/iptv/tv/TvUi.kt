@@ -37,6 +37,22 @@ object TvUi {
         addState(intArrayOf(android.R.attr.state_activated), surface(control, radius))
         addState(intArrayOf(), surface(Color.TRANSPARENT, radius))
     }
+    /** Readable position: 23:10 or 1:45:00. */
+    fun clock(seconds: Double): String {
+        val total = seconds.toLong().coerceAtLeast(0)
+        return if (total >= 3600) "%d:%02d:%02d".format(total / 3600, (total / 60) % 60, total % 60) else "%d:%02d".format(total / 60, total % 60)
+    }
+    /** Five-pointed star, shared by the player button and the badges on cards and rows. */
+    fun starPath(path: Path, cx: Float, cy: Float, outer: Float, inner: Float): Path = path.apply {
+        reset()
+        for (i in 0 until 10) {
+            val radius = if (i % 2 == 0) outer else inner
+            val angle = Math.toRadians(-90.0 + i * 36.0)
+            val x = cx + (radius * Math.cos(angle)).toFloat(); val y = cy + (radius * Math.sin(angle)).toFloat()
+            if (i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+        close()
+    }
     fun animationsEnabled(context: Context): Boolean = if (android.os.Build.VERSION.SDK_INT >= 26) ValueAnimator.areAnimatorsEnabled()
         else android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
 
@@ -115,6 +131,30 @@ class TvList(context: Context) : androidx.recyclerview.widget.RecyclerView(conte
     }
 }
 
+/** Favourite marker on cards and rows. Touch/mouse can toggle it; it is never a D-pad stop,
+ * so grid navigation keeps one focus target per card. */
+class StarBadge(context: Context) : View(context) {
+    var active = false
+        set(value) { if (field != value) { field = value; invalidate() } }
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val path = Path()
+    init {
+        isFocusable = false; isFocusableInTouchMode = false
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val size = minOf(width, height).toFloat()
+        if (size <= 0f) return
+        val cx = width / 2f; val cy = height / 2f
+        paint.style = Paint.Style.FILL; paint.color = 0xCC091018.toInt()
+        canvas.drawCircle(cx, cy, size / 2f, paint)
+        TvUi.starPath(path, cx, cy + size * 0.03f, size * 0.36f, size * 0.15f)
+        if (active) { paint.color = TvUi.accent; canvas.drawPath(path, paint) }
+        else { paint.style = Paint.Style.STROKE; paint.strokeWidth = size * 0.07f; paint.color = Color.WHITE; canvas.drawPath(path, paint) }
+    }
+}
+
 class TvIconButton(context: Context, var symbol: String, description: String, action: () -> Unit) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val iconPath = Path()
@@ -163,6 +203,11 @@ class TvIconButton(context: Context, var symbol: String, description: String, ac
                         else { moveTo(4f,9f); lineTo(9f,9f); lineTo(9f,4f) }
                     },paint); canvas.restore()
                 }
+            }
+            "star", "star_on" -> {
+                // Outline when not a favourite, filled accent when active: the state reads at a glance.
+                if (symbol == "star_on") { paint.style = Paint.Style.FILL; if (isEnabled) paint.color = TvUi.accent }
+                canvas.drawPath(TvUi.starPath(iconPath, 12f, 12.6f, 9.6f, 4.1f), paint)
             }
             "settings" -> {
                 canvas.drawCircle(12f,12f,6f,paint); canvas.drawCircle(12f,12f,2.2f,paint)

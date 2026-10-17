@@ -28,6 +28,9 @@ pub enum Request {
         key: String,
         #[serde(default)]
         xtream: bool,
+        /// Stable per-source secret for content keys; kept by the caller across generations.
+        #[serde(default)]
+        salt: String,
     },
     OpenCatalog {
         path: String,
@@ -72,6 +75,11 @@ pub enum Request {
         #[serde(default)]
         series: bool,
     },
+    /// Map stable content keys (history, favourites) to ids of the current revision.
+    Resolve {
+        revision: u64,
+        keys: Vec<String>,
+    },
     Adjacent {
         revision: u64,
         id: usize,
@@ -105,6 +113,9 @@ pub enum Request {
     Select {
         revision: u64,
         id: usize,
+        /// Saved position in seconds for VOD; ignored for live channels.
+        #[serde(default)]
+        resume: Option<f64>,
     },
     Sample {
         attempt: u64,
@@ -157,6 +168,8 @@ pub struct Engine {
     paused: bool,
     import_ms: f64,
     catalog: Option<crate::catalog::Catalog>,
+    /// Saved position for the current selection until recovery has observed its own.
+    resume_hint: Option<f64>,
     pub cancelled: Arc<AtomicBool>,
 }
 struct SearchResults {
@@ -196,6 +209,7 @@ impl Default for Engine {
             paused: false,
             import_ms: 0.0,
             catalog: None,
+            resume_hint: None,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -223,7 +237,7 @@ impl Engine {
                 Ok(json!({"revision":self.revision}))
             }
             Request::Info => Ok(
-                json!({"core_version":"0.4.0","catalog_schema":crate::catalog::SCHEMA,"catalog_bytes":crate::catalog::BYTE_LIMIT,"catalog_entries":crate::catalog::ENTRY_LIMIT}),
+                json!({"core_version":"0.4.2","catalog_schema":crate::catalog::SCHEMA,"catalog_bytes":crate::catalog::BYTE_LIMIT,"catalog_entries":crate::catalog::ENTRY_LIMIT}),
             ),
             Request::BuildCatalog {
                 path,
@@ -231,13 +245,14 @@ impl Engine {
                 target,
                 key,
                 xtream,
+                salt,
             } => {
                 if std::path::Path::new(&target).exists() {
                     return Err("catalog_target_exists".into());
                 }
                 let started = Instant::now();
                 let result = (|| {
-                    let mut writer = crate::catalog::Writer::create(&target, &key)?;
+                    let mut writer = crate::catalog::Writer::create_salted(&target, &key, &salt)?;
                     writer.cancelled = Some(self.cancelled.clone());
                     let summary = if xtream {
                         crate::xtream::build_manifest(&path, &mut writer)?
@@ -331,6 +346,14 @@ impl Engine {
                 data["revision"] = json!(revision);
                 Ok(data)
             }
+            Request::Resolve { revision, keys } => {
+                self.check_revision(revision)?;
+                match &self.catalog {
+                    Some(catalog) => catalog.resolve(revision, &keys),
+                    // The in-memory compatibility path has no persistent identities.
+                    None => Ok(json!({"revision":revision,"keyed":false,"items":[]})),
+                }
+            }
             Request::Adjacent {
                 revision,
                 id,
@@ -360,7 +383,13 @@ impl Engine {
             Request::Entry { revision, id } => {
                 self.check_revision(revision)?;
                 let c = self.channel(id)?;
-                Ok(json!({"id":id,"series_id":c.series_id,"name":c.name}))
+                let key = match &self.catalog {
+                    Some(catalog) => catalog.key_of(id)?,
+                    None => None,
+                };
+                Ok(
+                    json!({"id":id,"series_id":c.series_id,"name":c.name,"key":key,"live":c.is_live}),
+                )
             }
             Request::ResolveSeries { revision, id, path } => {
                 self.check_revision(revision)?;
@@ -496,7 +525,11 @@ impl Engine {
                     .collect();
                 Ok(json!({"revision": self.revision, "total": ids.len(), "items": items}))
             }
-            Request::Select { revision, id } => {
+            Request::Select {
+                revision,
+                id,
+                resume,
+            } => {
                 self.check_revision(revision)?;
                 let channel = self.channel(id)?;
                 if channel.series_id.is_some() {
@@ -508,6 +541,8 @@ impl Engine {
                 }
                 self.selected = Some(id);
                 self.paused = false;
+                self.resume_hint = resume
+                    .filter(|seconds| !channel.is_live && seconds.is_finite() && *seconds > 0.0);
                 self.recovery.select(now, channel.is_live);
                 self.load()
             }
@@ -585,6 +620,7 @@ impl Engine {
             }
             Request::Stop => {
                 self.selected = None;
+                self.resume_hint = None;
                 self.paused = false;
                 self.attempt += 1;
                 self.recovery.stop();
@@ -727,6 +763,7 @@ impl Engine {
         self.filter = None;
         // Current media continues in Android until an explicit channel selection. Rust cancels its old watchdog.
         self.selected = None;
+        self.resume_hint = None;
         self.paused = false;
         self.attempt += 1;
         self.recovery.stop();
@@ -734,8 +771,10 @@ impl Engine {
     fn load(&mut self) -> Result<Value, String> {
         let channel = self.channel(self.selected.ok_or("no_selection")?)?;
         self.attempt += 1;
+        // A position observed in this session wins; until then a retry keeps the saved one.
+        let resume = self.recovery.resume_position().or(self.resume_hint);
         Ok(
-            json!({"action":"load", "attempt":self.attempt, "url":channel.url, "name":channel.name, "live":channel.is_live, "user_agent":channel.headers.user_agent, "referrer":channel.headers.referrer, "resume":self.recovery.resume_position()}),
+            json!({"action":"load", "attempt":self.attempt, "url":channel.url, "name":channel.name, "live":channel.is_live, "user_agent":channel.headers.user_agent, "referrer":channel.headers.referrer, "resume":resume}),
         )
     }
     fn status(&self) -> Value {

@@ -58,12 +58,20 @@ class PlaybackController(
     private var ingress = IngressMeter()
     private var live = false
     private var bufferTargetMs = 3_000
+    /** Increments per selection; the player created for it reports samples under this token. */
+    private var selection = 0L
+    private var playerSelection = 0L
+    /** History/progress observer. Runs on the main thread and must not block. */
+    var onSample: (PlaybackSample) -> Unit = {}
 
-    suspend fun select(revision: Long, id: Long) = operations.withLock {
-        val command = core.call("select", "revision" to revision, "id" to id)
+    /** Returns the selection token used for this item's samples. */
+    suspend fun select(revision: Long, id: Long, resumeSec: Double? = null): Long = operations.withLock {
+        val command = core.call("select", "revision" to revision, "id" to id, "resume" to resumeSec)
         selected = true; terminal = false; userPaused = false
         lastError=null
+        val token = ++selection
         apply(command)
+        token
     }
     suspend fun start() = operations.withLock {
         foreground = true
@@ -86,6 +94,7 @@ class PlaybackController(
                                 "cache_end" to current.bufferedPosition.coerceAtLeast(0) / 1000.0,
                                 "buffering" to (current.playbackState == Player.STATE_BUFFERING), "ingress" to rate))
                             publishStats(rate)
+                            if (player === current) sample(current, PlaybackSample.Event.TICK)
                         } else {
                             if (!terminal) apply(core.call("tick"))
                             publishStats()
@@ -113,6 +122,7 @@ class PlaybackController(
         cancelRetry()
         val command=core.call("pause", "paused" to userPaused)
         player?.playWhenReady = !userPaused
+        if (userPaused) player?.let { sample(it, PlaybackSample.Event.PAUSE) }
         if (!userPaused && selected && !terminal && player?.playbackState == Player.STATE_IDLE) {
             // A pause during backoff leaves a stopped player. Resume needs a fresh load.
             apply(core.call("reconnect"))
@@ -204,6 +214,7 @@ class PlaybackController(
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
             .setHandleAudioBecomingNoisy(true).build()
         player = p
+        playerSelection = selection
         p.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== p || attempt != token) return
@@ -226,6 +237,7 @@ class PlaybackController(
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (player !== p || attempt != token) return
+                if (playbackState == Player.STATE_ENDED) sample(p, PlaybackSample.Event.ENDED)
                 if (playbackState == Player.STATE_ENDED) scope.launch { operations.withLock { if (player === p && attempt == token) apply(core.call("ended", "attempt" to token, "error" to false)) } }
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
@@ -274,8 +286,20 @@ class PlaybackController(
             format = if (format != null && format.width > 0 && format.height > 0) "${format.width} × ${format.height}" else "",
         ))
     }
+    /** Position and duration come from Media3 only; the observer never sees a recycled player. */
+    private fun sample(p: ExoPlayer, event: PlaybackSample.Event) {
+        val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 && !live }
+        try {
+            onSample(PlaybackSample(playerSelection, p.currentPosition.coerceAtLeast(0), duration, p.isPlaying, event))
+        } catch (error: Exception) {
+            // History must never interrupt playback.
+            lastError = JSONObject().put("history_error", error.javaClass.simpleName)
+        }
+    }
     fun releasePlayer() {
         cancelRetry()
+        // Last position of this player, still under the token of the selection that created it.
+        player?.let { sample(it, PlaybackSample.Event.RELEASE) }
         view.player = null
         view.keepScreenOn = false
         session?.release(); session = null

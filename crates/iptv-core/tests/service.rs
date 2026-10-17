@@ -60,14 +60,22 @@ fn paging_never_transfers_credentials_and_invalid_ids_are_errors() {
     );
     assert_eq!(result["items"][0]["id"], 1);
     assert!(
-        e.execute_at(Request::Select { revision, id: 999 }, Duration::ZERO)
-            .is_err()
+        e.execute_at(
+            Request::Select {
+                revision,
+                id: 999,
+                resume: None
+            },
+            Duration::ZERO
+        )
+        .is_err()
     );
     assert!(
         e.execute_at(
             Request::Select {
                 revision: revision + 1,
-                id: 0
+                id: 0,
+                resume: None
             },
             Duration::ZERO
         )

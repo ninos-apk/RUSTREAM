@@ -6,6 +6,7 @@ use aes_gcm::{
 };
 use rusqlite::{Connection, OptionalExtension, params, types::Value as SqlValue};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -20,7 +21,9 @@ use std::{
 pub const BYTE_LIMIT: u64 = 512 * 1024 * 1024;
 pub const ENTRY_LIMIT: usize = 2_000_000;
 pub const CATEGORY_LIMIT: usize = 20_000;
-pub const SCHEMA: i64 = 2;
+pub const SCHEMA: i64 = 3;
+/// Most stable content keys resolved by one request; matches the DTO page limit.
+pub const RESOLVE_LIMIT: usize = 128;
 
 pub fn io_code(error: &io::Error) -> String {
     match error.kind() {
@@ -88,6 +91,8 @@ pub struct Catalog {
     pub schema: i64,
     db: Connection,
     cipher: Aes256Gcm,
+    /// Per-source secret: content keys survive re-imports without exposing bare URL hashes.
+    salt: String,
     pub count: usize,
     pub skipped: usize,
 }
@@ -102,6 +107,12 @@ pub struct Writer {
 }
 impl Writer {
     pub fn create(path: &str, key: &str) -> Result<Self, String> {
+        Self::create_salted(path, key, "")
+    }
+    pub fn create_salted(path: &str, key: &str, salt: &str) -> Result<Self, String> {
+        if salt.len() > 128 {
+            return Err("invalid_identity_salt".into());
+        }
         if Path::new(path).exists() {
             return Err("catalog_target_exists".into());
         }
@@ -110,7 +121,7 @@ impl Writer {
         db.execute_batch("PRAGMA cache_size=-2048; PRAGMA temp_store=FILE; PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL;
           CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
           CREATE TABLE categories(id INTEGER PRIMARY KEY,name TEXT NOT NULL,kind INTEGER NOT NULL,count INTEGER NOT NULL);
-          CREATE TABLE channels(id INTEGER PRIMARY KEY,name TEXT NOT NULL,kind INTEGER NOT NULL,category INTEGER NOT NULL,tvg_id TEXT NOT NULL,search_key TEXT NOT NULL,secret BLOB NOT NULL,series_id TEXT,parent INTEGER,season INTEGER,episode INTEGER,year INTEGER,quality TEXT);
+          CREATE TABLE channels(id INTEGER PRIMARY KEY,name TEXT NOT NULL,kind INTEGER NOT NULL,category INTEGER NOT NULL,tvg_id TEXT NOT NULL,search_key TEXT NOT NULL,secret BLOB NOT NULL,series_id TEXT,parent INTEGER,season INTEGER,episode INTEGER,year INTEGER,quality TEXT,ukey BLOB);
           CREATE TABLE shows(id INTEGER PRIMARY KEY,identity TEXT NOT NULL UNIQUE,title TEXT NOT NULL,artwork INTEGER);
           CREATE TABLE members(channel INTEGER PRIMARY KEY,show INTEGER NOT NULL,season INTEGER,episode INTEGER);
           BEGIN IMMEDIATE;").map_err(sql_code)?;
@@ -118,6 +129,7 @@ impl Writer {
             catalog: Catalog {
                 db,
                 cipher,
+                salt: salt.into(),
                 schema: SCHEMA,
                 count: 0,
                 skipped: 0,
@@ -236,7 +248,7 @@ impl Writer {
                 .execute(params![id, count])
                 .map_err(sql_code)?;
         }
-        self.catalog.db.execute_batch("CREATE INDEX channels_kind ON channels(kind,parent,id); CREATE INDEX channels_category ON channels(category,parent,id); CREATE INDEX episodes_parent ON channels(parent,season,episode,id); CREATE INDEX members_show ON members(show,season,episode,channel);").map_err(sql_code)?;
+        self.catalog.db.execute_batch("CREATE INDEX channels_kind ON channels(kind,parent,id); CREATE INDEX channels_category ON channels(category,parent,id); CREATE INDEX episodes_parent ON channels(parent,season,episode,id); CREATE INDEX members_show ON members(show,season,episode,channel); CREATE INDEX channels_ukey ON channels(ukey);").map_err(sql_code)?;
         for (key, value) in [
             ("schema", SCHEMA as usize),
             ("count", self.next),
@@ -250,6 +262,13 @@ impl Writer {
                 )
                 .map_err(sql_code)?;
         }
+        self.catalog
+            .db
+            .execute(
+                "INSERT INTO meta VALUES('identity_salt',?1)",
+                [&self.catalog.salt],
+            )
+            .map_err(sql_code)?;
         self.catalog
             .db
             .execute_batch("COMMIT; PRAGMA optimize;")
@@ -272,11 +291,22 @@ impl Catalog {
             .map_err(|_| "catalog_invalid".into())
         };
         let schema = meta("schema")? as i64;
-        if !matches!(schema, 1 | SCHEMA) {
+        if !matches!(schema, 1 | 2 | SCHEMA) {
             return Err("catalog_incompatible".into());
         }
+        let salt = if schema >= 3 {
+            db.query_row(
+                "SELECT value FROM meta WHERE key='identity_salt'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .map_err(sql_code)?
+        } else {
+            String::new()
+        };
         let result = Self {
             schema,
+            salt,
             count: meta("count")?,
             skipped: meta("skipped")?,
             cipher: cipher(key)?,
@@ -310,10 +340,10 @@ impl Catalog {
                 .map_err(|_| "catalog_encrypt_failed")?,
         );
         self.db
-            .prepare_cached(if self.schema == 1 {
-                "INSERT INTO channels VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
-            } else {
-                "INSERT INTO channels VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
+            .prepare_cached(match self.schema {
+                1 => "INSERT INTO channels VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                2 => "INSERT INTO channels VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                _ => "INSERT INTO channels VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
             })
             .map_err(sql_code)?
             .execute(rusqlite::params_from_iter({
@@ -333,6 +363,9 @@ impl Catalog {
                 if self.schema >= 2 {
                     values.push(c.year.map(i64::from).into());
                     values.push(c.quality.clone().into());
+                }
+                if self.schema >= 3 {
+                    values.push(self.content_key(c).into());
                 }
                 values
             }))
@@ -508,10 +541,10 @@ impl Catalog {
             .map_err(sql_code)?;
         values.push((limit.clamp(1, 128) as i64).into());
         values.push((offset.min(i64::MAX as usize) as i64).into());
-        let columns = if self.schema >= 2 {
-            "year,quality"
-        } else {
-            "NULL,NULL"
+        let columns = match self.schema {
+            1 => "NULL,NULL,NULL",
+            2 => "year,quality,NULL",
+            _ => "year,quality,ukey",
         };
         let mut stmt=self.db.prepare(&format!("SELECT id,name,category,kind,series_id,{columns} FROM channels WHERE {filter} ORDER BY id LIMIT ? OFFSET ?")).map_err(sql_code)?;
         let items=stmt.query_map(rusqlite::params_from_iter(values.iter()),|r|{
@@ -521,6 +554,7 @@ impl Catalog {
                 item["item_type"]=json!(if series_id.is_some() {"series"} else {"entry"});
                 item["year"]=json!(r.get::<_,Option<u16>>(5)?);
                 item["quality"]=json!(r.get::<_,Option<String>>(6)?);
+                item["key"]=json!(r.get::<_,Option<Vec<u8>>>(7)?.as_deref().map(key_text));
             }
             Ok(item)
         }).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
@@ -576,10 +610,11 @@ impl Catalog {
         let mut stmt = self
             .db
             .prepare(&format!(
-                "SELECT s.id,s.title {from} ORDER BY s.id LIMIT ? OFFSET ?"
+                "SELECT s.id,s.title,s.identity {from} ORDER BY s.id LIMIT ? OFFSET ?"
             ))
             .map_err(sql_code)?;
-        let items=stmt.query_map(rusqlite::params_from_iter(values.iter()),|r|Ok(json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"item_type":"series","kind":"series","live":false}))).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
+        let keyed = self.schema >= 3;
+        let items=stmt.query_map(rusqlite::params_from_iter(values.iter()),|r|Ok(json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"item_type":"series","kind":"series","live":false,"key":if keyed {Some(show_key(&r.get::<_,String>(2)?))} else {None}}))).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
         Ok(json!({"revision":revision,"total":total,"items":items}))
     }
 
@@ -625,16 +660,20 @@ impl Catalog {
             data["season_total"] = json!(data["seasons"].as_array().map_or(0, Vec::len));
             return Ok(data);
         }
-        let title: String = self
+        let (title, identity): (String, String) = self
             .db
-            .query_row("SELECT title FROM shows WHERE id=?1", [id], |r| r.get(0))
+            .query_row("SELECT title,identity FROM shows WHERE id=?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .optional()
             .map_err(sql_code)?
             .ok_or("not_a_series")?;
+        let keyed = self.schema >= 3;
+        let ukey = if keyed { "c.ukey" } else { "NULL" };
         let filter = "m.show=?1 AND c.series_id IS NULL AND (?2=0 OR m.season IS NULL) AND (?3 IS NULL OR m.season=?3)";
         let total:usize=self.db.query_row(&format!("SELECT count(*) FROM members m JOIN channels c ON c.id=m.channel WHERE {filter}"),params![id,unknown,season],|r|r.get(0)).map_err(sql_code)?;
-        let mut stmt=self.db.prepare(&format!("SELECT c.id,c.name,m.season,m.episode,c.year,c.quality FROM members m JOIN channels c ON c.id=m.channel WHERE {filter} ORDER BY m.season IS NULL,m.season,m.episode IS NULL,m.episode,c.id LIMIT 128 OFFSET ?4")).map_err(sql_code)?;
-        let items=stmt.query_map(params![id,unknown,season,offset.min(i64::MAX as usize) as i64],|r|Ok(json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"season":r.get::<_,Option<i64>>(2)?,"episode":r.get::<_,Option<i64>>(3)?,"year":r.get::<_,Option<i64>>(4)?,"quality":r.get::<_,Option<String>>(5)?,"item_type":"entry"}))).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
+        let mut stmt=self.db.prepare(&format!("SELECT c.id,c.name,m.season,m.episode,c.year,c.quality,{ukey} FROM members m JOIN channels c ON c.id=m.channel WHERE {filter} ORDER BY m.season IS NULL,m.season,m.episode IS NULL,m.episode,c.id LIMIT 128 OFFSET ?4")).map_err(sql_code)?;
+        let items=stmt.query_map(params![id,unknown,season,offset.min(i64::MAX as usize) as i64],|r|Ok(json!({"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,"season":r.get::<_,Option<i64>>(2)?,"episode":r.get::<_,Option<i64>>(3)?,"year":r.get::<_,Option<i64>>(4)?,"quality":r.get::<_,Option<String>>(5)?,"key":r.get::<_,Option<Vec<u8>>>(6)?.as_deref().map(key_text),"item_type":"entry"}))).map_err(sql_code)?.collect::<Result<Vec<_>,_>>().map_err(sql_code)?;
         let seasons_from = "FROM members m JOIN channels c ON c.id=m.channel WHERE m.show=?1 AND c.series_id IS NULL GROUP BY m.season";
         let season_total: usize = self
             .db
@@ -654,8 +693,89 @@ impl Catalog {
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_code)?;
         Ok(
-            json!({"name":title,"series_id":self.channel(id)?.series_id,"total":total,"season_total":season_total,"items":items,"seasons":seasons}),
+            json!({"name":title,"key":if keyed {Some(show_key(&identity))} else {None},"series_id":self.channel(id)?.series_id,"total":total,"season_total":season_total,"items":items,"seasons":seasons}),
         )
+    }
+
+    /// Stable identity of a playable record. Kind separates a URL listed in two sections.
+    /// Stored as 16 raw bytes: half the column and index size of the hex text form.
+    fn content_key(&self, c: &Channel) -> Option<Vec<u8>> {
+        if self.schema < 3 || c.url.is_empty() {
+            return None;
+        }
+        let mut hash = Sha256::new();
+        hash.update(self.salt.as_bytes());
+        hash.update([0, kind_id(c.kind) as u8, 0]);
+        hash.update(c.url.as_bytes());
+        Some(hash.finalize()[..16].to_vec())
+    }
+    /// The stable key of a current record; None for catalogs older than schema 3.
+    pub fn key_of(&self, id: usize) -> Result<Option<String>, String> {
+        if self.schema < 3 {
+            return Ok(None);
+        }
+        self.db
+            .query_row("SELECT ukey FROM channels WHERE id=?1", [id], |r| {
+                r.get::<_, Option<Vec<u8>>>(0)
+            })
+            .optional()
+            .map_err(sql_code)?
+            .map(|key| key.as_deref().map(key_text))
+            .ok_or_else(|| "invalid_channel".into())
+    }
+    /// Map stable keys to the ids of this revision. Unknown keys are omitted, never guessed.
+    pub fn resolve(&self, revision: u64, keys: &[String]) -> Result<Value, String> {
+        if keys.len() > RESOLVE_LIMIT {
+            return Err("too_many_keys".into());
+        }
+        let mut items = Vec::new();
+        if self.schema < 3 {
+            return Ok(json!({"revision":revision,"keyed":false,"items":items}));
+        }
+        for key in keys {
+            if let Some(identity) = key.strip_prefix("s:") {
+                let show = self
+                    .db
+                    .prepare_cached("SELECT id,title FROM shows WHERE identity=?1")
+                    .map_err(sql_code)?
+                    .query_row([identity], |r| {
+                        Ok((r.get::<_, usize>(0)?, r.get::<_, String>(1)?))
+                    })
+                    .optional()
+                    .map_err(sql_code)?;
+                if let Some((id, name)) = show {
+                    items.push(json!({"key":key,"id":id,"name":name,"item_type":"series","kind":"series","live":false}));
+                }
+                continue;
+            }
+            // Malformed keys never match; they are omitted like unknown ones.
+            let Some(bytes) = key_bytes(key) else {
+                continue;
+            };
+            // Identical streams listed twice share one key; the first listing represents both.
+            let row = self
+                .db
+                .prepare_cached("SELECT c.id,c.name,c.kind,c.series_id,c.year,c.quality,m.show,m.season,m.episode,s.identity,s.title FROM channels c LEFT JOIN members m ON m.channel=c.id LEFT JOIN shows s ON s.id=m.show WHERE c.ukey=?1 ORDER BY c.id LIMIT 1")
+                .map_err(sql_code)?
+                .query_row([bytes.as_slice()], |r| {
+                    let kind: i64 = r.get(2)?;
+                    let series = r.get::<_, Option<String>>(3)?.is_some();
+                    Ok(json!({"key":key,"id":r.get::<_,usize>(0)?,"name":r.get::<_,String>(1)?,
+                        "kind":kind_key(kind_from(kind)),"live":kind==0,
+                        "item_type":if series {"series"} else {"entry"},
+                        "year":r.get::<_,Option<i64>>(4)?,"quality":r.get::<_,Option<String>>(5)?,
+                        "show_id":r.get::<_,Option<usize>>(6)?,"season":r.get::<_,Option<i64>>(7)?,
+                        "episode":r.get::<_,Option<i64>>(8)?,
+                        "show_key":r.get::<_,Option<String>>(9)?.map(|identity|show_key(&identity)),
+                        "show_name":r.get::<_,Option<String>>(10)?}))
+                })
+                .optional()
+                .map_err(sql_code)?;
+            if let Some(row) = row {
+                items.push(row);
+            }
+        }
+        Ok(json!({"revision":revision,"keyed":true,"items":items}))
     }
 
     /// Resolve neighbours in the playback context, independently of the current browser view.
@@ -966,6 +1086,35 @@ fn expand_record(v: &Value, c: &mut Channel, group: &str) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+/// Public form of a content key: "c:" and 32 lower-case hex digits.
+fn key_text(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut key = String::with_capacity(2 + bytes.len() * 2);
+    key.push_str("c:");
+    for byte in bytes {
+        key.push(HEX[(byte >> 4) as usize] as char);
+        key.push(HEX[(byte & 15) as usize] as char);
+    }
+    key
+}
+fn key_bytes(key: &str) -> Option<[u8; 16]> {
+    let hex = key.strip_prefix("c:")?.as_bytes();
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for (i, pair) in hex.chunks(2).enumerate() {
+        let digit = |b: u8| (b as char).to_digit(16);
+        bytes[i] = (digit(pair[0])? * 16 + digit(pair[1])?) as u8;
+    }
+    Some(bytes)
+}
+
+/// Series are remembered as one show, never as an episode, so their key is the show identity.
+fn show_key(identity: &str) -> String {
+    format!("s:{identity}")
 }
 
 /// Collect matching shows once from the filtered channels. A correlated EXISTS per show

@@ -24,7 +24,7 @@ Zurück schließt zunächst sichtbare Playercontrols, verlässt Vollbild, führt
 
 Im Raster navigiert Rechts zur nächsten Karte; in Details und Live bleibt der Player erreichbar. Die Toolbar lässt sich horizontal navigieren und unterstützt auch den vierten Bereich und große Zähler. Vollständige lange Titel sind mit Info bzw. langem Druck erreichbar und als zugänglicher Name vorhanden. TextViews verwenden native Unicode-/Bidi-Darstellung; es gibt keine manuelle Zeichenumkehr und keinen Windows-GDI-Port.
 
-„Zuletzt gesehen“, Favoriten und dauerhaftes Fortsetzen sind in Abschnitt 7 des [erweiterten Plans](WINDOWS_CONTENT_LOGIK_ANALYSE_UND_PLAN.md) ausgearbeitet und gehören zum geplanten Folgeausbau. Sie sind in 0.4.0 noch nicht implementiert.
+„Zuletzt gesehen“, Favoriten und dauerhaftes Fortsetzen waren in 0.4.0 noch nicht enthalten. Sie folgen in [0.4.2](USER_LIBRARY_042.md).
 
 ## Katalog und Upgrade
 

@@ -87,6 +87,24 @@ class MainActivity : ComponentActivity() {
     private lateinit var movieTitle:TextView
     private lateinit var moviePoster:ImageView
     private lateinit var moviePlay:Button
+    private lateinit var movieRestart:Button
+    private lateinit var movieFavorite:Button
+    private lateinit var movieProgress:TextView
+    private lateinit var seriesResume:Button
+    private lateinit var seriesFavorite:Button
+    /** History, favourites and progress; independent of catalog generations. */
+    private val userLibrary=UserLibrary()
+    private lateinit var libraryStore:UserLibraryStore
+    private lateinit var tracker:WatchTracker
+    private var userLibraryLoaded=false
+    private var activeSourceId:String?=null
+    /** "recent" or "favorites" replaces the provider category; null lists the catalog. */
+    private var special:String?=null
+    private var openedSeriesKey:String?=null
+    private var openedSeriesName=""
+    private var pendingSpecialFocus:Int?=null
+    private var libraryRefreshWork:Job?=null
+    private var shownCounts=""
     private var openedMovie:Row?=null
     private var openedSeries:Long?=null
     private var chosenSeason:Long?=null
@@ -97,7 +115,8 @@ class MainActivity : ComponentActivity() {
     private var seriesWork:Job?=null
     private data class BrowseSnapshot(val total:Int,val focus:Long?,val index:Int)
     private var browseSnapshot:BrowseSnapshot?=null
-    private data class PlayContext(val kind:String,val category:Long?,val query:String,val show:Long?,val season:Long?,val unknown:Boolean)
+    /** [ids] is the fixed order of a history/favourites list; channel +/- steps through it. */
+    private data class PlayContext(val kind:String,val category:Long?,val query:String,val show:Long?,val season:Long?,val unknown:Boolean,val ids:List<Long>?=null)
     private var playContext:PlayContext?=null
     private val gridMode get()=kind!="live" && openedSeries==null && openedMovie==null
     private var libraryReady = false
@@ -136,11 +155,21 @@ class MainActivity : ComponentActivity() {
     private var busy = false
     private var firstChannelFocus = true
     private var lifecycleWork: Job? = null
-    private val channelRows = Rows(true) { item -> when{item.series->openSeries(item.id);kind=="movies"->openMovie(item);else->selectChannel(item.id)} }
+    private val channelRows = Rows(true) { item -> when{
+        !item.available->status.text="„${item.title}“ ist in der aktuellen Liste nicht verfügbar · Lange OK zum Entfernen"
+        item.series->openSeries(item.id);kind=="movies"->openMovie(item);else->selectChannel(item.id)} }
     private val categoryRows = Rows { item ->
         closeSeries(false,false)
+        special = when(item.id){ RECENT_ROW->"recent"; FAVORITES_ROW->"favorites"; else->null }
         category = item.id.takeIf { it >= 0 }; offset = 0
         renderCategories(); search()
+    }
+    private companion object {
+        const val RECENT_ROW=-2L
+        const val FAVORITES_ROW=-3L
+        /** Remembered entries missing from the current list get ids below this value. */
+        const val UNAVAILABLE_BASE=-1000L
+        const val STATUS="status"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -159,6 +188,10 @@ class MainActivity : ComponentActivity() {
             details.refreshButton.isEnabled = selectedId != null && reconnectWork?.isActive != true && !busy
         })
         playback.bufferProfile = PlaybackBufferProfile.fromKey(getPreferences(MODE_PRIVATE).getString("liveBufferProfile", null))
+        libraryStore = UserLibraryStore(applicationContext)
+        tracker = WatchTracker(userLibrary)
+        userLibrary.historyLimit = getPreferences(MODE_PRIVATE).getInt("historyLimit", UserLibrary.DEFAULT_LIMIT)
+        playback.onSample = { tracker.onSample(it) }
         onBackPressedDispatcher.addCallback(this) { handleBack() }
         startLibrary()
     }
@@ -167,6 +200,11 @@ class MainActivity : ComponentActivity() {
         chrome.visibility = View.INVISIBLE
         startup.showLoading("Gespeicherte Quelle wird geladen …")
         startupWork = launchSafe {
+            if (!userLibraryLoaded) {
+                // Before the catalog opens, so the first list already shows stars and progress.
+                libraryStore.load(userLibrary); userLibraryLoaded = true
+                userLibrary.listener = { libraryStore.schedule(userLibrary); onLibraryChanged() }
+            }
             sources = withContext(Dispatchers.IO) { store.load() }
             if (sources.isNotEmpty()) {
                 val activeId=getPreferences(MODE_PRIVATE).getString("activeSourceId",null)
@@ -233,7 +271,7 @@ class MainActivity : ComponentActivity() {
         browserColumn.addView(channelEmpty)
         clearFiltersButton = button("Suche zurücksetzen") {
             closeSeries(false,false)
-            category=null; query=""; categorySearch.setText(""); channelSearch.setText("")
+            category=null; special=null; query=""; categorySearch.setText(""); channelSearch.setText("")
             searchWork?.cancel(); renderCategories(); search(); channelSearch.requestFocus()
         }.apply { visibility=View.GONE }
         browserColumn.addView(clearFiltersButton,LinearLayout.LayoutParams(-1,-2))
@@ -243,8 +281,16 @@ class MainActivity : ComponentActivity() {
         seriesPoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
         seriesHeader.addView(seriesPoster,LinearLayout.LayoutParams(-1,dp(56)))
         seriesHeader.addView(seriesTitle)
+        seriesResume=button("Fortsetzen"){resumeSeries()}.apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END;visibility=View.GONE}
+        seriesHeader.addView(seriesResume,LinearLayout.LayoutParams(-1,-2))
+        // Season choice and the show's star share one row; episodes keep their vertical space.
+        val seasonRow=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         seasonButton=button("Staffel wählen"){chooseSeason()}
-        seriesHeader.addView(seasonButton,LinearLayout.LayoutParams(-1,-2))
+        seasonRow.addView(seasonButton,LinearLayout.LayoutParams(0,-2,1f))
+        seriesFavorite=button("☆"){openedSeriesKey?.let{toggleFavorite(LibrarySection.SERIES,it,openedSeriesName)}}.apply{textSize=16f}
+        seriesFavorite.minWidth=dp(44);seriesFavorite.minimumWidth=dp(44)
+        seasonRow.addView(seriesFavorite,LinearLayout.LayoutParams(-2,-2).apply{marginStart=dp(4)})
+        seriesHeader.addView(seasonRow,LinearLayout.LayoutParams(-1,-2))
         browserColumn.addView(seriesHeader,LinearLayout.LayoutParams(-1,-2))
         movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
         movieHeader.addView(button("← Filmbibliothek"){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
@@ -252,8 +298,15 @@ class MainActivity : ComponentActivity() {
         movieHeader.addView(moviePoster,LinearLayout.LayoutParams(-1,dp(100)))
         movieTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8))}
         movieHeader.addView(movieTitle)
+        movieProgress=label("",12f).apply{setTextColor(TvUi.muted);setPadding(dp(6),0,dp(6),dp(6));visibility=View.GONE}
+        movieHeader.addView(movieProgress)
+        // Saved progress resumes automatically; "from the start" ignores it.
         moviePlay=button("Abspielen"){openedMovie?.let{selectChannel(it.id)}}
         movieHeader.addView(moviePlay,LinearLayout.LayoutParams(-1,-2))
+        movieRestart=button("Von Anfang an"){openedMovie?.let{selectChannel(it.id,fromStart=true)}}.apply{visibility=View.GONE}
+        movieHeader.addView(movieRestart,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
+        movieFavorite=button("☆ Zu Favoriten"){openedMovie?.let{row->row.key?.let{toggleFavorite(LibrarySection.MOVIES,it,row.title)}}}
+        movieHeader.addView(movieFavorite,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
         movieScroll=ScrollView(this).apply{isFillViewport=false;visibility=View.GONE;addView(movieHeader)}
         browserColumn.addView(movieScroll,LinearLayout.LayoutParams(-1,0,1f))
         browserColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
@@ -305,7 +358,7 @@ class MainActivity : ComponentActivity() {
         })
     }
     private fun settingsDialog() {
-        val choices=arrayOf("Quellen verwalten","Datei hinzufügen","URL hinzufügen","Xtream anmelden","EPG importieren","Bilddarstellung","Live-Pufferprofil","Diagnosebericht",getString(R.string.app_info))
+        val choices=arrayOf("Quellen verwalten","Datei hinzufügen","URL hinzufügen","Xtream anmelden","EPG importieren","Bilddarstellung","Live-Pufferprofil","Zuletzt gesehen · Anzahl","Diagnosebericht",getString(R.string.app_info))
         val dialog=AlertDialog.Builder(this).create()
         val menu=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
@@ -316,7 +369,7 @@ class MainActivity : ComponentActivity() {
         val actions=choices.mapIndexed { index,choice ->
             button(choice) {
                     dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->diagnosticsDialog(); 8->appInfoDialog() }
+                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->diagnosticsDialog(); 9->appInfoDialog() }
             }.apply {
                 menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
             }
@@ -362,31 +415,197 @@ class MainActivity : ComponentActivity() {
                 dialog.dismiss()
             }.setNegativeButton("Schließen", null).show()
     }
-    private fun selectChannel(id: Long, preserveContext:Boolean=false) {
+    private fun historyDialog() {
+        val choices=UserLibrary.LIMIT_CHOICES
+        AlertDialog.Builder(this).setTitle("„Zuletzt gesehen“ · Einträge je Bereich")
+            .setSingleChoiceItems(choices.map { "$it Einträge" }.toTypedArray(), choices.indexOf(userLibrary.historyLimit)) { dialog, index ->
+                getPreferences(MODE_PRIVATE).edit().putInt("historyLimit", choices[index]).apply()
+                // Lowering trims immediately; progress and favourites stay untouched.
+                userLibrary.historyLimit = choices[index]
+                dialog.dismiss()
+            }.setNegativeButton("Schließen", null).show()
+    }
+    /** [fromStart] ignores saved progress; otherwise VOD continues where it stopped. */
+    private fun selectChannel(id: Long, preserveContext:Boolean=false, fromStart:Boolean=false) {
         if(selectionWork?.isActive==true || busy) return
-        if (id==selectedId && playback.player!=null && playback.phase !in setOf("idle","finished","error")) {
+        if (id==selectedId && playback.player!=null && playback.phase !in setOf("idle","finished","error") && !fromStart) {
             playerPane.cancelSeek(); setFullScreen(true); return
         }
         playerPane.cancelSeek()
-        val requestContext=PlayContext(kind,category,query,openedSeries,chosenSeason,unknownSeason)
+        val listed=if(special!=null&&openedSeries==null&&kind!="series")channelRows.rows.filter{it.available}.map{it.id} else null
+        val requestContext=PlayContext(kind,category,query,openedSeries,chosenSeason,unknownSeason,listed)
         val requestRevision=revision
         selectionWork=launchSafe {
         val entry=core.call("entry","revision" to requestRevision,"id" to id)
         if(requestRevision!=revision)return@launchSafe
         val seriesId=entry.optString("series_id").takeIf{it.isNotEmpty()&&it!="null"}
         if(seriesId!=null){openSeries(id)}else{
-            playback.select(requestRevision,id)
             if(!preserveContext)playContext=requestContext
+            startPlayback(requestRevision,id,entry,fromStart,(playContext?:requestContext).kind)
             markChannel(id);updateLibraryLayout();refreshGuide()
         }
     } }
-    private suspend fun fetchRows(rev:Long,section:String,group:Long?,text:String,start:Int,limit:Int):JSONObject {
+    /** Selects [id] and starts tracking it for history and progress. */
+    private suspend fun startPlayback(rev:Long,id:Long,entry:JSONObject,fromStart:Boolean,contextKind:String){
+        val key=entry.optString("key").takeIf{it.isNotEmpty()&&it!="null"}
+        val live=entry.optBoolean("live")
+        val source=activeSourceId
+        val resume=if(fromStart||live||key==null||source==null)null else userLibrary.progress(source,key)?.resumeSec
+        val token=playback.select(rev,id,resume)
+        beginTracking(token,rev,id,key,entry.optString("name"),live,contextKind)
+    }
+    private suspend fun beginTracking(token:Long,rev:Long,id:Long,key:String?,name:String,live:Boolean,contextKind:String){
+        val source=activeSourceId
+        val section=LibrarySection.of(contextKind)
+        if(key==null||source==null||section==null||(section==LibrarySection.LIVE)!=live){tracker.clear();updatePlayerFavorite();return}
+        val info=resolveKeys(rev,listOf(key)).first[key]
+        val showKey=info?.optString("show_key")?.takeIf{it.isNotEmpty()&&it!="null"}
+        // An episode is remembered under its show; a series section entry without a show is not tracked.
+        if(section==LibrarySection.SERIES&&showKey==null){tracker.clear();updatePlayerFavorite();return}
+        val logo=if(section==LibrarySection.LIVE)try{core.call("artwork","revision" to rev,"id" to id,"series" to false).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}catch(error:CoreException){null} else null
+        if(rev!=revision)return
+        tracker.begin(NowPlaying(token,source,section,key,name,logo,showKey,
+            info?.optString("show_name")?.takeIf{showKey!=null&&it.isNotEmpty()&&it!="null"},
+            info?.takeIf{!it.isNull("season")}?.optLong("season"),info?.takeIf{!it.isNull("episode")}?.optLong("episode")))
+        updatePlayerFavorite()
+    }
+    /** Maps stable keys to the current revision in requests that stay below the JNI size limit. */
+    private suspend fun resolveKeys(rev:Long,keys:List<String>):Pair<Map<String,JSONObject>,Boolean>{
+        val found=HashMap<String,JSONObject>()
+        var keyed=true
+        val batch=mutableListOf<String>();var bytes=0
+        suspend fun send(){
+            if(batch.isEmpty())return
+            val data=core.call("resolve","revision" to rev,"keys" to JSONArray(batch))
+            keyed=keyed&&data.optBoolean("keyed",false)
+            val items=data.getJSONArray("items")
+            for(i in 0 until items.length()){val item=items.getJSONObject(i);found[item.getString("key")]=item}
+            batch.clear();bytes=0
+        }
+        for(key in keys.distinct()){
+            if(key.length>1024)continue
+            if(batch.size>=64||bytes+key.length>8_000)send()
+            batch+=key;bytes+=key.length+4
+        }
+        send()
+        return found to keyed
+    }
+    private fun updatePlayerFavorite(){
+        if(!::playerPane.isInitialized)return
+        val item=tracker.current;val source=activeSourceId
+        playerPane.setFavorite(if(item==null||source==null||item.source!=source)null else userLibrary.isFavorite(source,item.section,item.libraryKey))
+    }
+    private fun toggleFavorite(section:LibrarySection,key:String,name:String){
+        val source=activeSourceId ?: return
+        val index=channelRows.rows.indexOfFirst{it.key==key}
+        userLibrary.toggleFavorite(source,section,key,name)
+        // In the favourites list the removed entry disappears; focus moves to its successor.
+        if(special=="favorites"&&openedSeries==null&&openedMovie==null&&index>=0&&!userLibrary.isFavorite(source,section,key)){pendingSpecialFocus=index;search()}
+    }
+    private fun removeRecent(section:LibrarySection,row:Row){
+        val source=activeSourceId ?: return
+        val key=row.key ?: return
+        val index=channelRows.rows.indexOf(row)
+        userLibrary.removeRecent(source,section,key)
+        if(special=="recent"){pendingSpecialFocus=index.coerceAtLeast(0);search()}
+    }
+    /** Coalesces bursts (start + favourite + progress) into one refresh of the visible state. */
+    private fun onLibraryChanged(){
+        if(!::channels.isInitialized)return
+        libraryRefreshWork?.cancel()
+        libraryRefreshWork=scope.launch {
+            delay(120)
+            if(channelRows.itemCount>0)channelRows.notifyItemRangeChanged(0,channelRows.itemCount,STATUS)
+            val source=activeSourceId;val section=LibrarySection.of(kind)
+            val counts=if(source==null||section==null)"" else "${userLibrary.recentCount(source,section)}/${userLibrary.favoriteCount(source,section)}/${userLibrary.historyLimit}"
+            if(counts!=shownCounts){
+                renderCategories()
+                // A changed history list re-sorts only while the user is not inside it.
+                if(special!=null&&openedSeries==null&&openedMovie==null&&!channels.hasFocus())search()
+            }
+            updateMovieActions();updateSeriesActions();updatePlayerFavorite()
+        }
+    }
+    private fun updateMovieActions(){
+        val row=openedMovie ?: return
+        val source=activeSourceId
+        val progress=if(source!=null&&row.key!=null)userLibrary.progress(source,row.key) else null
+        val playing=row.id==selectedId&&playback.player!=null
+        val resume=progress?.resumeSec
+        moviePlay.text=when{playing->"Wiedergabe öffnen";resume!=null->"Fortsetzen bei ${TvUi.clock(resume)}";progress?.done==true->"Erneut abspielen";else->"Abspielen"}
+        movieRestart.visibility=if(!playing&&resume!=null)View.VISIBLE else View.GONE
+        movieProgress.text=when{
+            progress==null->""
+            progress.done->"✓ Bereits gesehen"
+            resume==null->""
+            else->progress.durationSec?.let{"Gesehen: ${TvUi.clock(resume)} von ${TvUi.clock(it)}"} ?: "Gesehen bis ${TvUi.clock(resume)}"
+        }
+        movieProgress.visibility=if(movieProgress.text.isEmpty())View.GONE else View.VISIBLE
+        val favorite=source!=null&&row.key!=null&&userLibrary.isFavorite(source,LibrarySection.MOVIES,row.key)
+        movieFavorite.visibility=if(source!=null&&row.key!=null)View.VISIBLE else View.GONE
+        movieFavorite.text=if(favorite)"★ Aus Favoriten entfernen" else "☆ Zu Favoriten hinzufügen"
+        movieFavorite.isActivated=true;movieFavorite.isSelected=favorite
+    }
+    private fun updateSeriesActions(){
+        if(openedSeries==null)return
+        val source=activeSourceId;val key=openedSeriesKey
+        val last=if(source!=null&&key!=null)userLibrary.lastEpisode(source,key) else null
+        val episodeKey=last?.episodeKey
+        if(source==null||episodeKey==null){seriesResume.visibility=View.GONE}else{
+            val progress=userLibrary.progress(source,episodeKey)
+            val label=last.episodeLabel ?: "Letzte Episode"
+            seriesResume.text=when{
+                progress?.done==true->"↻ $label erneut ansehen"
+                progress?.resumeSec!=null->"▶ Fortsetzen · $label · ${TvUi.clock(progress.resumeSec!!)}"
+                else->"▶ Fortsetzen · $label"
+            }+(last.episodeTitle?.let{"\n$it"}?:"")
+            seriesResume.contentDescription=seriesResume.text.toString().replace("\n"," · ")
+            seriesResume.visibility=View.VISIBLE
+        }
+        val favorite=source!=null&&key!=null&&userLibrary.isFavorite(source,LibrarySection.SERIES,key)
+        seriesFavorite.visibility=if(source!=null&&key!=null)View.VISIBLE else View.GONE
+        seriesFavorite.text=if(favorite)"★" else "☆"
+        seriesFavorite.contentDescription=if(favorite)"Serie aus Favoriten entfernen" else "Serie zu Favoriten hinzufügen"
+        seriesFavorite.setTextColor(if(favorite)TvUi.accent else Color.WHITE)
+    }
+    private fun resumeSeries(){
+        val source=activeSourceId ?: return
+        val key=openedSeriesKey ?: return
+        val episodeKey=userLibrary.lastEpisode(source,key)?.episodeKey ?: return
+        val rev=revision
+        launchSafe {
+            val item=resolveKeys(rev,listOf(episodeKey)).first[episodeKey]
+            if(rev!=revision||openedSeriesKey!=key)return@launchSafe
+            if(item==null){status.text="Die zuletzt gesehene Episode ist in der aktuellen Liste nicht verfügbar.";return@launchSafe}
+            val season=item.takeIf{!it.isNull("season")}?.optLong("season")
+            // Channel +/- then continues within the season of the resumed episode.
+            if(season!=chosenSeason||unknownSeason!=(season==null)){chosenSeason=season;unknownSeason=season==null;updateSeasonLabel();libraryFocusId=null;search()}
+            selectChannel(item.getLong("id"))
+        }
+    }
+    private suspend fun fetchRows(rev:Long,section:String,group:Long?,text:String,start:Int,limit:Int,list:String?=null):JSONObject {
         val show=openedSeries
+        if(show==null&&list!=null)return libraryRows(rev,section,list,text,start,limit)
         if(show==null)return core.call("browse","revision" to rev,"kind" to section,"category" to group,"query" to text,"offset" to start,"limit" to limit)
         val data=core.call("series_page","revision" to rev,"id" to show,"season" to chosenSeason,"unknown" to unknownSeason,"offset" to start)
         val all=data.getJSONArray("items")
         data.put("items",JSONArray().apply{repeat(minOf(limit,all.length())){put(all.getJSONObject(it))}})
         return data
+    }
+    /** History or favourites in their stored order, mapped to this revision one page at a time. */
+    private suspend fun libraryRows(rev:Long,section:String,list:String,text:String,start:Int,limit:Int):JSONObject {
+        val source=activeSourceId;val librarySection=LibrarySection.of(section)
+        val all=if(source==null||librarySection==null)emptyList() else if(list=="recent")userLibrary.recent(source,librarySection) else userLibrary.favorites(source,librarySection)
+        val terms=text.lowercase(java.util.Locale.ROOT).split(' ','\t').filter{it.isNotEmpty()}
+        val matching=if(terms.isEmpty())all else all.filter{item->val name=item.name.lowercase(java.util.Locale.ROOT);terms.all{name.contains(it)}}
+        val page=matching.drop(start).take(limit)
+        val (resolved,keyed)=resolveKeys(rev,page.map{it.key})
+        val items=JSONArray()
+        page.forEachIndexed{i,item->
+            items.put(resolved[item.key] ?: JSONObject().put("id",UNAVAILABLE_BASE-start-i).put("name",item.name).put("key",item.key)
+                .put("available",false).put("item_type",if(librarySection==LibrarySection.SERIES)"series" else "entry"))
+        }
+        return JSONObject().put("revision",rev).put("total",matching.size).put("items",items).put("keyed",keyed||page.isEmpty())
     }
     private fun updateGridColumns(){
         val layout=channels.layoutManager as? GridLayoutManager ?: return
@@ -414,7 +633,7 @@ class MainActivity : ComponentActivity() {
         seriesPoster.visibility=if(large)View.GONE else View.VISIBLE
         movieHeader.visibility=if(openedMovie!=null)View.VISIBLE else View.GONE
         movieScroll.visibility=movieHeader.visibility
-        openedMovie?.let{moviePlay.text=if(it.id==selectedId&&playback.player!=null)"Wiedergabe öffnen" else "Abspielen"}
+        updateMovieActions()
         channels.visibility=if(openedMovie!=null)View.GONE else View.VISIBLE
         resultCount.visibility=if(openedMovie!=null)View.GONE else View.VISIBLE
         channelSearch.visibility=if(!gridMode&&kind!="live")View.GONE else View.VISIBLE
@@ -427,7 +646,7 @@ class MainActivity : ComponentActivity() {
         browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
         openedMovie=row
         movieTitle.text=listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")
-        moviePlay.text=if(row.id==selectedId&&playback.player!=null)"Wiedergabe öffnen" else "Abspielen"
+        updateMovieActions()
         val rev=revision
         artwork.bind(moviePoster,"$rev:${row.id}:false"){core.call("artwork","revision" to rev,"id" to row.id,"series" to false).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
         updateLibraryLayout();moviePlay.requestFocus()
@@ -449,7 +668,11 @@ class MainActivity : ComponentActivity() {
             if(status.text.toString()=="Episoden werden geladen …")status.text="${data.getInt("total")} Episoden verfügbar"
             browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
             openedSeries=id;seasonOffset=0;seriesSeasons=data.getJSONArray("seasons");seasonTotal=data.getInt("season_total")
-            val first=seriesSeasons.optJSONObject(0)
+            openedSeriesKey=data.optString("key").takeIf{it.isNotEmpty()&&it!="null"};openedSeriesName=data.getString("name")
+            // Open on the season of the last watched episode when the first season page lists it.
+            val lastSeason=activeSourceId?.let{source->openedSeriesKey?.let{userLibrary.lastEpisode(source,it)}}?.season
+            val first=(0 until seriesSeasons.length()).map(seriesSeasons::getJSONObject)
+                .firstOrNull{lastSeason!=null&&!it.isNull("season")&&it.getLong("season")==lastSeason} ?: seriesSeasons.optJSONObject(0)
             chosenSeason=if(first==null||first.isNull("season"))null else first.getLong("season")
             unknownSeason=first?.isNull("season")==true
             val summary="${data.getString("name")}\n$seasonTotal Staffeln · ${data.getInt("total")} Episoden"
@@ -458,7 +681,7 @@ class MainActivity : ComponentActivity() {
             seriesTitle.ellipsize=TextUtils.TruncateAt.END
             seriesTitle.contentDescription=summary
             artwork.bind(seriesPoster,"$rev:$id:true"){core.call("artwork","revision" to rev,"id" to id,"series" to true).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
-            updateSeasonLabel();updateLibraryLayout();firstChannelFocus=true
+            updateSeasonLabel();updateSeriesActions();updateLibraryLayout();firstChannelFocus=true
             libraryFocusId=null;search();channels.scrollToPosition(0)
         }
     }
@@ -491,7 +714,7 @@ class MainActivity : ComponentActivity() {
         // In-flight page loads belong to the old generation and will not clear their own flags.
         loadingPage=false;focusNextPage=false;selectNextPage=false
         pendingPrevious=false;pendingPreviousFocus=false;pendingPreviousSelect=false
-        openedSeries=null;openedMovie=null;chosenSeason=null;unknownSeason=false
+        openedSeries=null;openedMovie=null;chosenSeason=null;unknownSeason=false;openedSeriesKey=null
         val snapshot=browseSnapshot;browseSnapshot=null
         // Episode rows belong to the closed series; never render them as library cards.
         if(!restore||snapshot==null){channelRows.replace(emptyList());total=0;offset=0}
@@ -501,9 +724,9 @@ class MainActivity : ComponentActivity() {
             offset=(snapshot.index/64)*64;total=snapshot.total;channelRows.replace(emptyList())
             libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
             resultCount.text=if(kind=="series")if(total==1)"1 Serie" else "$total Serien" else "$total Filme";channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
-            val rev=revision;val start=offset;val section=kind;val group=category;val text=query
+            val rev=revision;val start=offset;val section=kind;val group=category;val text=query;val list=special
             launchSafe{
-                val data=fetchRows(rev,section,group,text,start,64)
+                val data=fetchRows(rev,section,group,text,start,64,list)
                 if(revision!=rev||searchGeneration!=generation)return@launchSafe
                 val items=data.getJSONArray("items");total=data.getInt("total")
                 channelRows.replace(List(items.length()){Row.from(items.getJSONObject(it))})
@@ -516,6 +739,11 @@ class MainActivity : ComponentActivity() {
         val context=playContext ?: return
         val rev=revision
         if(selectionWork?.isActive==true)return
+        context.ids?.let{ids->
+            val index=ids.indexOf(id)
+            if(index>=0)ids.getOrNull(index+direction)?.let{selectChannel(it,true)}
+            return
+        }
         launchSafe {
             val next=core.call("adjacent","revision" to rev,"id" to id,"direction" to direction,
                 "kind" to context.kind,"category" to context.category,"query" to context.query,
@@ -527,9 +755,10 @@ class MainActivity : ComponentActivity() {
     private fun playerAction(action: String) {
         when(action) {
             "play" -> launchSafe {
-                if(playback.player==null || playback.phase=="finished") selectedId?.let { playback.select(revision,it); markChannel(it) }
+                if(playback.player==null || playback.phase=="finished") selectedId?.let { restartSelection(it); markChannel(it) }
                 else playback.togglePause()
             }
+            "favorite" -> tracker.current?.let { toggleFavorite(it.section,it.libraryKey,it.seriesName ?: it.name) }
             "back" -> launchSafe { playback.seek(-30_000) }
             "forward" -> launchSafe { playback.seek(30_000) }
             "stop" -> launchSafe { playerPane.cancelSeek(); playback.stop(); channelRows.notifyDataSetChanged(); playerPane.showControls(true) }
@@ -538,7 +767,7 @@ class MainActivity : ComponentActivity() {
                 val restoreRefreshFocus=details.refreshButton.hasFocus()
                 playerPane.cancelSeek(); details.refreshButton.isEnabled=false
                 reconnectWork=launchSafe { try {
-                    if(playback.player==null) selectedId?.let { playback.select(revision,it) } else playback.reconnect()
+                    if(playback.player==null) selectedId?.let { restartSelection(it) } else playback.reconnect()
                 } finally {
                     details.refreshButton.isEnabled=selectedId!=null && !busy
                     if(restoreRefreshFocus && details.refreshButton.isEnabled && hasWindowFocus())details.refreshButton.requestFocus()
@@ -548,6 +777,13 @@ class MainActivity : ComponentActivity() {
             "library" -> returnToChannels()
             "statistics" -> details.refreshButton.takeIf { it.isEnabled }?.requestFocus() ?: status.requestFocus()
         }
+    }
+    /** Play the selection again after stop/end: a new token, saved progress unless it finished. */
+    private suspend fun restartSelection(id:Long){
+        val rev=revision
+        val entry=core.call("entry","revision" to rev,"id" to id)
+        if(rev!=revision)return
+        startPlayback(rev,id,entry,false,playContext?.kind ?: kind)
     }
     override fun onStart() {
         super.onStart()
@@ -569,12 +805,13 @@ class MainActivity : ComponentActivity() {
         if (::playerPane.isInitialized) playerPane.cancelSeek()
         if (::playback.isInitialized) {
             val previous = lifecycleWork
-            lifecycleWork = scope.launch { previous?.join(); playback.suspendPlayback() }
+            // The release reports the final position; write it now instead of relying on app exit.
+            lifecycleWork = scope.launch { previous?.join(); playback.suspendPlayback(); libraryStore.flush(userLibrary) }
         }
         super.onStop()
     }
     override fun onDestroy() {
-        if (::playback.isInitialized) playback.release()
+        if (::playback.isInitialized) { playback.release(); if (userLibraryLoaded) libraryStore.flush(userLibrary) }
         artwork.close()
         scope.cancel()
         if (::loader.isInitialized) loader.close()
@@ -612,10 +849,14 @@ class MainActivity : ComponentActivity() {
             val result = cached ?: loader.load(source, core)
             // Playlist replacement is explicit: stop the previous media and its watchdog together.
             playback.stop()
+            // The stop above reported the last position; later samples belong to no item.
+            tracker.clear()
             closeSeries(false,false);playContext=null
             revision = result.getLong("revision"); selectedId = null
             libraryFocusId=null; libraryFocusIndex=0; libraryFocusRevision=revision
             activeSource=source
+            activeSourceId=loader.identity(source)
+            updatePlayerFavorite()
             searchGeneration++
             channelRows.replace(emptyList())
             firstChannelFocus = true
@@ -627,7 +868,7 @@ class MainActivity : ComponentActivity() {
                 try{withContext(Dispatchers.IO) { store.save(updated) };sources=updated}
                 catch(error:Exception){throw ImportFailure("source_save_failed","save_source")}
             }
-            getPreferences(MODE_PRIVATE).edit().putString("activeSourceId",loader.identity(source)).apply()
+            getPreferences(MODE_PRIVATE).edit().putString("activeSourceId",activeSourceId).apply()
             val warning=result.optJSONArray("warnings")?.length()?:0
             status.text = "${result.getInt("count")} Einträge${if(cached!=null)" · gespeichert" else ""}${if(warning>0)" · Hinweise im Diagnosebericht" else ""} · ${source.optString("name", "Playlist")}"
             if(cached!=null&&loader.shouldRefresh(source)){
@@ -665,7 +906,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun switchKind(value: String, refresh: Boolean = true) {
         closeSeries(false,false)
-        kind = value; category = null; offset = 0; query = ""
+        kind = value; category = null; special = null; offset = 0; query = ""
         searchGeneration++
         searchWork?.cancel()
         channelSearch.setText(""); categorySearch.setText("")
@@ -682,12 +923,23 @@ class MainActivity : ComponentActivity() {
     private fun renderCategories() {
         val text = categorySearch.text.toString().trim().lowercase(java.util.Locale.ROOT)
         val matches = categoryItems.filter { it.kind == kind && it.name.lowercase(java.util.Locale.ROOT).contains(text) }
-        val rows = mutableListOf(Row(-1, "Alle Kategorien"))
+        val rows = mutableListOf<Row>()
+        val section = LibrarySection.of(kind)
+        val source = activeSourceId
+        // Personal lists come first in Live, Movies and Series; the category search filters providers only.
+        if (section != null && text.isEmpty()) {
+            val recent = source?.let { userLibrary.recentCount(it, section) } ?: 0
+            val favorites = source?.let { userLibrary.favoriteCount(it, section) } ?: 0
+            rows += Row(RECENT_ROW, "Zuletzt gesehen ($recent)")
+            rows += Row(FAVORITES_ROW, "★ Favoriten ($favorites)")
+        }
+        shownCounts = if (source == null || section == null) "" else "${userLibrary.recentCount(source,section)}/${userLibrary.favoriteCount(source,section)}/${userLibrary.historyLimit}"
+        rows += Row(-1, "Alle Kategorien")
         rows += matches.map { Row(it.id, "${it.name} (${it.count})") }
         categoryRows.replace(rows)
         categoryEmpty.visibility = if (matches.isEmpty()) View.VISIBLE else View.GONE
         categoryEmpty.text = if (text.isNotEmpty()) "Keine Kategorien für „${categorySearch.text}“. Suche löschen, um alle Kategorien zu sehen." else "In diesem Bereich gibt es keine Kategorien."
-        channelHeading.text = categoryItems.firstOrNull { it.id == category }?.name ?: "Alle Kategorien"
+        channelHeading.text = when (special) { "recent" -> "Zuletzt gesehen"; "favorites" -> "Favoriten"; else -> categoryItems.firstOrNull { it.id == category }?.name ?: "Alle Kategorien" }
     }
     private fun search() {
         offset=0; loadingPage=false; focusNextPage=false; selectNextPage=false
@@ -698,15 +950,29 @@ class MainActivity : ComponentActivity() {
         val requestCategory = category
         val requestQuery = query
         val requestOffset = offset
+        val requestSpecial = special.takeIf { openedSeries == null }
+        val focusIndex = pendingSpecialFocus; pendingSpecialFocus = null
         launchSafe {
-            val data = fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,64)
+            val data = fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,64,requestSpecial)
             if (generation != searchGeneration || revision != requestRevision) return@launchSafe
             total = data.getInt("total")
             val array = data.getJSONArray("items")
             channelRows.replace(List(array.length()) { i -> val c = array.getJSONObject(i); Row.from(c) })
             channelEmpty.visibility = if (total == 0) View.VISIBLE else View.GONE
-            channelEmpty.text = if(requestQuery.isNotBlank()) "Keine Treffer für „$requestQuery“." else "Keine Einträge in dieser Auswahl."
+            channelEmpty.text = when {
+                requestQuery.isNotBlank() -> "Keine Treffer für „$requestQuery“."
+                requestSpecial != null && !data.optBoolean("keyed", true) -> "Die Bibliothek wird aktualisiert. Verlauf und Favoriten erscheinen nach dem nächsten Laden der Quelle."
+                requestSpecial == "recent" -> "Noch nichts angesehen. Gestartete ${when(requestKind){"live"->"Sender";"movies"->"Filme";else->"Serien"}} erscheinen hier."
+                requestSpecial == "favorites" -> "Noch keine Favoriten. ★ in der Detailansicht oder im Player wählen, oder lange OK auf einem Eintrag drücken."
+                else -> "Keine Einträge in dieser Auswahl."
+            }
             clearFiltersButton.visibility = if(total==0 && (requestQuery.isNotBlank() || requestCategory!=null || categorySearch.text.isNotBlank())) View.VISIBLE else View.GONE
+            if (focusIndex != null) {
+                // After removing an entry: its successor, else the list's category row.
+                if (array.length() > 0) { val target = focusIndex.coerceIn(0, array.length() - 1); channels.scrollToPosition(target)
+                    channels.doOnNextLayout { channels.findViewHolderForAdapterPosition(target)?.itemView?.requestFocus() } }
+                else categories.post { categories.findViewHolderForItemId(if (requestSpecial == "recent") RECENT_ROW else FAVORITES_ROW)?.itemView?.requestFocus() }
+            }
             if (catalogPending) {
                 channels.doOnNextLayout { if(generation==searchGeneration) showLibrary() }
                 channels.requestLayout()
@@ -727,10 +993,10 @@ class MainActivity : ComponentActivity() {
         val generation=searchGeneration
         val requestRevision=revision
         val start=offset+channelRows.itemCount
-        val requestKind=kind; val requestCategory=category; val requestQuery=query
+        val requestKind=kind; val requestCategory=category; val requestQuery=query; val requestSpecial=special.takeIf{openedSeries==null}
         launchSafe {
             try {
-                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,start,64)
+                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,start,64,requestSpecial)
                 if(generation!=searchGeneration || revision!=requestRevision) return@launchSafe
                 val array=data.getJSONArray("items")
                 var localStart=channelRows.itemCount
@@ -763,9 +1029,9 @@ class MainActivity : ComponentActivity() {
         loadingPage=true
         val generation=searchGeneration;val requestRevision=revision
         val requestOffset=(offset-64).coerceAtLeast(0);val oldOffset=offset
-        val requestKind=kind;val requestCategory=category;val requestQuery=query
+        val requestKind=kind;val requestCategory=category;val requestQuery=query;val requestSpecial=special.takeIf{openedSeries==null}
         launchSafe{try{
-            val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,(oldOffset-requestOffset))
+            val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,requestOffset,(oldOffset-requestOffset),requestSpecial)
             if(generation!=searchGeneration||revision!=requestRevision)return@launchSafe
             val array=data.getJSONArray("items")
             val layout=channels.layoutManager as LinearLayoutManager
@@ -812,7 +1078,7 @@ class MainActivity : ComponentActivity() {
             .setItems(sources.map { it.optString("name", "Playlist") }.toTypedArray()) { _, i ->
                 val removed=sources[i]
                 val confirm=AlertDialog.Builder(this).setTitle("Quelle „${removed.optString("name","Playlist")}“ entfernen?")
-                    .setMessage("Die gespeicherte Quelle, ihre Anmeldung und ihr lokaler Katalog werden entfernt. Du kannst sie anschließend erneut hinzufügen.")
+                    .setMessage("Die gespeicherte Quelle, ihre Anmeldung, ihr lokaler Katalog sowie „Zuletzt gesehen“, Favoriten und Wiedergabefortschritt dieser Quelle werden entfernt. Du kannst die Quelle anschließend erneut hinzufügen.")
                     .setNegativeButton("Abbrechen",null)
                     .setPositiveButton("Quelle entfernen") { _,_-> launchSafe {
                         refreshWork?.cancel()
@@ -826,6 +1092,9 @@ class MainActivity : ComponentActivity() {
                             libraryReady=false;chrome.visibility=View.INVISIBLE;startup.showEmpty()
                         }
                         loader.remove(removed)
+                        val removedId=loader.identity(removed)
+                        if(activeSourceId==removedId){activeSourceId=null;tracker.clear();updatePlayerFavorite()}
+                        userLibrary.removeSource(removedId);libraryStore.flush(userLibrary)
                     } }.create()
                 confirm.show()
                 confirm.getButton(AlertDialog.BUTTON_NEGATIVE).apply { isFocusableInTouchMode=true;requestFocus() }
@@ -953,9 +1222,9 @@ class MainActivity : ComponentActivity() {
             loadingPage=false;pendingPrevious=false;pendingPreviousFocus=false;pendingPreviousSelect=false
             val generation=++searchGeneration;val requestRevision=revision
             val targetOffset=(libraryFocusIndex.coerceIn(0,total-1)/64)*64
-            val requestKind=kind;val requestCategory=category;val requestQuery=query
+            val requestKind=kind;val requestCategory=category;val requestQuery=query;val requestSpecial=special.takeIf{openedSeries==null}
             launchSafe {
-                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,targetOffset,64)
+                val data=fetchRows(requestRevision,requestKind,requestCategory,requestQuery,targetOffset,64,requestSpecial)
                 if(revision!=requestRevision || searchGeneration!=generation)return@launchSafe
                 val array=data.getJSONArray("items")
                 offset=targetOffset;channelRows.replace(List(array.length()){i->val c=array.getJSONObject(i);Row.from(c)})
@@ -1003,6 +1272,7 @@ class MainActivity : ComponentActivity() {
             .put("build_id",BuildConfig.CORE_BUILD_ID)
             .put("core",core.call("info")).put("import",loader.lastReport).put("last_error",lastFailure?:JSONObject.NULL)
             .put("playback_error",playback.lastError?:JSONObject.NULL)
+            .put("user_library",libraryStore.diagnostics(userLibrary))
         if(android.os.Build.VERSION.SDK_INT>=30){
             val manager=getSystemService(android.app.ActivityManager::class.java)
             val exit=manager.getHistoricalProcessExitReasons(packageName,0,1).firstOrNull()
@@ -1027,16 +1297,69 @@ class MainActivity : ComponentActivity() {
     private fun label(value: String, size: Float) = TvUi.text(this,value,size)
     private fun button(value: String, click: () -> Unit) = TvUi.button(this,value,click)
     private fun list(adapter: Rows) = TvList(this).apply { id = View.generateViewId(); layoutManager = TvLinearLayoutManager(this@MainActivity); this.adapter = adapter; setHasFixedSize(true); itemAnimator = null; clipToPadding=false; setPadding(dp(2),dp(2),dp(2),dp(2)) }
-    private data class Row(val id:Long,val title:String,val series:Boolean=false,val year:String="",val quality:String="",val episode:String="") {
+    /** [key] is the stable identity for history/favourites; [available] is false for a remembered
+     * entry that the current list no longer contains. */
+    private data class Row(val id:Long,val title:String,val series:Boolean=false,val year:String="",val quality:String="",val episode:String="",
+                           val key:String?=null,val available:Boolean=true) {
         companion object {fun from(c:JSONObject)=Row(c.getLong("id"),c.getString("name"),c.optString("item_type")=="series",
             if(c.isNull("year"))"" else c.optString("year"),if(c.isNull("quality"))"" else c.optString("quality"),
-            if(c.isNull("episode"))"" else "E"+c.optString("episode").padStart(2,'0'))}
+            if(c.isNull("episode"))"" else "E"+c.optString("episode").padStart(2,'0'),
+            c.optString("key").takeIf{it.isNotEmpty()&&it!="null"},c.optBoolean("available",true))}
+    }
+    /** Section of the visible list: episodes and series cards belong to Series. */
+    private val listSection get()=LibrarySection.of(kind)
+    private fun favoriteOf(row:Row):Boolean{
+        val source=activeSourceId ?: return false
+        val section=listSection ?: return false
+        val key=row.key ?: return false
+        return openedSeries==null&&userLibrary.isFavorite(source,section,key)
+    }
+    /** Short status for cards and rows: progress, last episode or the "watched" mark. */
+    private fun progressLabel(row:Row):Pair<String?,Float?>{
+        val source=activeSourceId ?: return null to null
+        if(!row.available)return "Derzeit nicht verfügbar" to null
+        val key=row.key ?: return null to null
+        if(row.series&&openedSeries==null){
+            val last=userLibrary.lastEpisode(source,key) ?: return null to null
+            val progress=last.episodeKey?.let{userLibrary.progress(source,it)}
+            val position=progress?.resumeSec?.let{" · "+TvUi.clock(it)} ?: if(progress?.done==true)" · ✓" else ""
+            return (last.episodeLabel ?: "Zuletzt gesehen")+position to progress?.takeIf{!it.done}?.fraction
+        }
+        if(kind=="live")return null to null
+        val progress=userLibrary.progress(source,key) ?: return null to null
+        if(progress.done)return "✓ Gesehen" to null
+        val resume=progress.resumeSec ?: return null to null
+        return (progress.durationSec?.let{"${TvUi.clock(resume)} / ${TvUi.clock(it)}"} ?: TvUi.clock(resume)) to progress.fraction
+    }
+    /** Long OK / Menu: favourite, history removal and the full title in one place. */
+    private fun rowActions(row:Row){
+        val source=activeSourceId;val section=listSection
+        val actions=mutableListOf<Pair<String,()->Unit>>()
+        // Episodes are never favourites themselves: the action applies to their show.
+        val favoriteKey=if(openedSeries!=null)openedSeriesKey else row.key
+        val favoriteName=if(openedSeries!=null)openedSeriesName else row.title
+        if(source!=null&&section!=null&&favoriteKey!=null){
+            val active=userLibrary.isFavorite(source,section,favoriteKey)
+            val label=if(openedSeries!=null)(if(active)"★ Serie aus Favoriten entfernen" else "☆ Serie zu Favoriten hinzufügen")
+                else if(active)"★ Aus Favoriten entfernen" else "☆ Zu Favoriten hinzufügen"
+            actions+=label to {toggleFavorite(section,favoriteKey,favoriteName)}
+        }
+        if(special=="recent"&&openedSeries==null&&source!=null&&section!=null&&row.key!=null)
+            actions+="Aus „Zuletzt gesehen“ entfernen" to {removeRecent(section,row)}
+        actions+="Vollständigen Titel anzeigen" to {showRowTitle(row)}
+        AlertDialog.Builder(this).setTitle(row.title).setItems(actions.map{it.first}.toTypedArray()){_,index->actions[index].second()}
+            .setNegativeButton("Schließen",null).show()
     }
     private data class CategoryItem(val id: Long, val name: String, val kind: String, val count: Int)
     private inner class Rows(private val channelList:Boolean=false,val select:(Row)->Unit):RecyclerView.Adapter<Rows.Holder>() {
         init{setHasStableIds(true)}
         val rows=ArrayList<Row>()
-        inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean):RecyclerView.ViewHolder(root)
+        inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean,
+                           val trailing:TextView?=null,val star:StarBadge?=null):RecyclerView.ViewHolder(root){
+            var row:Row?=null
+            /** OK pressed on this row and whether it became a long press. */
+            var okDown=false;var okLong=false
+        }
         override fun getItemId(position:Int)=rows[position].id
         override fun getItemViewType(position:Int)=if(channelList&&gridMode)1 else 0
         override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder{
@@ -1049,7 +1372,14 @@ class MainActivity : ComponentActivity() {
                 accessibilityDelegate=object:View.AccessibilityDelegate(){override fun onInitializeAccessibilityNodeInfo(host:View,info:AccessibilityNodeInfo){
                     super.onInitializeAccessibilityNodeInfo(host,info);info.className=Button::class.java.name
                     info.isSelected=host.isActivated
-                    if(android.os.Build.VERSION.SDK_INT>=30&&host.isActivated)info.stateDescription=if(channelList)"Wird wiedergegeben" else "Ausgewählte Kategorie"
+                    if(android.os.Build.VERSION.SDK_INT>=30){
+                        val row=(channels.findContainingViewHolder(host) as? Holder)?.row
+                        val states=listOfNotNull(
+                            if(host.isActivated)(if(channelList)"Wird wiedergegeben" else "Ausgewählte Kategorie") else null,
+                            if(channelList&&row!=null&&favoriteOf(row))"Favorit" else null,
+                            if(channelList&&row!=null)progressLabel(row).first else null)
+                        if(states.isNotEmpty())info.stateDescription=states.joinToString(", ")
+                    }
                 }}
             }
             val image=if(channelList)(if(card)PosterImageView(this@MainActivity) else ImageView(this@MainActivity)).apply{
@@ -1060,32 +1390,66 @@ class MainActivity : ComponentActivity() {
             val text=label("",if(card)12f else 13f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
             root.addView(text,LinearLayout.LayoutParams(if(card)-1 else 0,-2,if(card)0f else 1f))
             val metadata=if(card)label("",10f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
-            return Holder(root,text,image,metadata,card)
+            // List rows (channels, episodes) end with progress text and the favourite star.
+            val trailing=if(channelList&&!card)label("",11f).apply{setTextColor(TvUi.muted);visibility=View.GONE;fontFeatureSettings="tnum"
+                root.addView(this,LinearLayout.LayoutParams(-2,-2).apply{marginStart=dp(4)})}else null
+            val star=if(channelList&&!card)StarBadge(this@MainActivity).apply{visibility=View.GONE
+                root.addView(this,LinearLayout.LayoutParams(dp(18),dp(18)).apply{marginStart=dp(4)})}else null
+            return Holder(root,text,image,metadata,card,trailing,star)
+        }
+        /** Favourite and progress only; a status payload never rebinds artwork or listeners. */
+        private fun bindStatus(holder:Holder,row:Row){
+            if(!channelList)return
+            val favorite=favoriteOf(row)
+            val (label,fraction)=progressLabel(row)
+            (holder.image as? PosterImageView)?.apply{this.favorite=favorite;this.progress=fraction}
+            holder.star?.apply{active=favorite;visibility=if(favorite)View.VISIBLE else View.GONE}
+            holder.trailing?.apply{text=label?:"";visibility=if(label==null)View.GONE else View.VISIBLE}
+            holder.metadata?.text=label ?: if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
+            holder.metadata?.setTextColor(if(label!=null&&row.available)TvUi.accent else TvUi.muted)
+            holder.root.alpha=if(row.available)1f else 0.55f
+        }
+        override fun onBindViewHolder(holder:Holder,position:Int,payloads:MutableList<Any>){
+            if(payloads.isNotEmpty()&&payloads.all{it==STATUS}){bindStatus(holder,rows[position]);return}
+            onBindViewHolder(holder,position)
         }
         override fun getItemCount()=rows.size
         override fun onBindViewHolder(holder:Holder,position:Int){
             val row=rows[position]
-            val active=if(channelList)!row.series&&row.id==selectedId&&::playback.isInitialized&&playback.player!=null else row.id==(category?:-1L)
+            holder.row=row
+            val activeCategory=when(special){"recent"->RECENT_ROW;"favorites"->FAVORITES_ROW;else->category?:-1L}
+            val active=if(channelList)!row.series&&row.id==selectedId&&::playback.isInitialized&&playback.player!=null else row.id==activeCategory
             holder.root.isActivated=active
             holder.text.text="${if(active)if(channelList)"▶ " else "✓ " else ""}${if(row.episode.isNotEmpty())row.episode+" · " else ""}${row.title}"
             holder.metadata?.text=if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
             holder.root.contentDescription=row.title
+            bindStatus(holder,row)
+            val poster=holder.image as? PosterImageView
+            poster?.focusedCard=holder.root.isFocused
+            poster?.onStar=row.key?.takeIf{row.available||special=="favorites"}?.let{key->{listSection?.let{toggleFavorite(it,key,row.title)};Unit}}
             TvUi.onFocus(holder.root){focused->
                 holder.text.maxLines=if(focused)4 else 2
+                poster?.focusedCard=focused
                 if(focused&&channelList&&holder.bindingAdapterPosition>=0){libraryFocusId=row.id;libraryFocusIndex=offset+holder.bindingAdapterPosition;libraryFocusRevision=revision}
             }
             holder.root.setOnClickListener{select(row)}
-            holder.root.setOnLongClickListener{showRowTitle(row);true}
+            holder.root.setOnLongClickListener{if(channelList)rowActions(row) else showRowTitle(row);true}
             holder.image?.let{view->
                 val rev=revision;val id=row.id;val series=row.series
                 artwork.bind(view,"$rev:$id:$series"){core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}}
             }
             holder.root.setOnKeyListener{_,key,event->
                 if(key in setOf(KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER)){
-                    if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0)select(row)
+                    // OK acts on release, so holding it opens the actions instead of also starting playback.
+                    when{
+                        event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0->{holder.okDown=true;holder.okLong=false}
+                        event.action==KeyEvent.ACTION_DOWN&&channelList&&holder.okDown&&!holder.okLong->{holder.okLong=true;rowActions(row)}
+                        event.action==KeyEvent.ACTION_UP->{if(holder.okDown&&!holder.okLong)select(row);holder.okDown=false;holder.okLong=false}
+                    }
                     return@setOnKeyListener true
                 }
                 if(key==KeyEvent.KEYCODE_INFO&&event.action==KeyEvent.ACTION_DOWN){showRowTitle(row);return@setOnKeyListener true}
+                if(channelList&&key==KeyEvent.KEYCODE_MENU){if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0)rowActions(row);return@setOnKeyListener true}
                 val index=holder.bindingAdapterPosition
                 if(index<0)return@setOnKeyListener false
                 // RIGHT always enters the adjacent entry list; geometry alone skips a short list.
@@ -1106,7 +1470,12 @@ class MainActivity : ComponentActivity() {
                 false
             }
         }
-        override fun onViewRecycled(holder:Holder){holder.image?.apply{tag=null;setImageDrawable(null)};super.onViewRecycled(holder)}
+        override fun onViewRecycled(holder:Holder){
+            holder.image?.apply{tag=null;setImageDrawable(null)}
+            (holder.image as? PosterImageView)?.onStar=null
+            holder.row=null;holder.okDown=false;holder.okLong=false
+            super.onViewRecycled(holder)
+        }
         fun replace(value:List<Row>){rows.clear();rows.addAll(value);notifyDataSetChanged()}
         fun append(value:List<Row>){val start=rows.size;rows.addAll(value);notifyItemRangeInserted(start,value.size)}
         fun prepend(value:List<Row>){rows.addAll(0,value);notifyItemRangeInserted(0,value.size)}
@@ -1117,10 +1486,45 @@ class MainActivity : ComponentActivity() {
 
 }
 
-/** Determine the poster ratio during measurement, including the first grid layout. */
+/** Determine the poster ratio during measurement, including the first grid layout.
+ * Favourite star and progress bar are drawn here: no extra views per card while scrolling. */
 private class PosterImageView(context:android.content.Context):ImageView(context){
+    var favorite=false; set(value){if(field!=value){field=value;invalidate()}}
+    /** Shows the outline star as a hint (and touch target) on the focused card. */
+    var focusedCard=false; set(value){if(field!=value){field=value;invalidate()}}
+    var progress:Float?=null; set(value){if(field!=value){field=value;invalidate()}}
+    /** Touch/mouse toggle on the star corner; the D-pad uses long OK or the details instead. */
+    var onStar:(()->Unit)?=null
+    private val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val path=android.graphics.Path()
+    private val starSize get()=TvUi.dp(context,22).toFloat()
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
         val width=View.MeasureSpec.getSize(widthMeasureSpec)
         super.onMeasure(widthMeasureSpec,View.MeasureSpec.makeMeasureSpec((width*1.5f).toInt(),View.MeasureSpec.EXACTLY))
+    }
+    override fun onDraw(canvas:android.graphics.Canvas){
+        super.onDraw(canvas)
+        progress?.let{fraction->
+            val bar=TvUi.dp(context,4).toFloat()
+            paint.style=android.graphics.Paint.Style.FILL
+            paint.color=0xCC36424E.toInt();canvas.drawRect(0f,height-bar,width.toFloat(),height.toFloat(),paint)
+            paint.color=TvUi.accent;canvas.drawRect(0f,height-bar,width*fraction.coerceIn(0.02f,1f),height.toFloat(),paint)
+        }
+        if(!favorite&&!focusedCard)return
+        val size=starSize;val margin=TvUi.dp(context,4).toFloat()
+        val cx=width-margin-size/2;val cy=margin+size/2
+        paint.style=android.graphics.Paint.Style.FILL;paint.color=0xCC091018.toInt()
+        canvas.drawCircle(cx,cy,size/2,paint)
+        TvUi.starPath(path,cx,cy+size*0.03f,size*0.36f,size*0.15f)
+        if(favorite){paint.color=TvUi.accent;canvas.drawPath(path,paint)}
+        else{paint.style=android.graphics.Paint.Style.STROKE;paint.strokeWidth=size*0.07f;paint.color=Color.WHITE;canvas.drawPath(path,paint)}
+    }
+    override fun onTouchEvent(event:android.view.MotionEvent):Boolean{
+        // Only a visible star reacts; a tap on a hidden corner keeps opening the card.
+        val toggle=onStar?.takeIf{favorite||focusedCard} ?: return super.onTouchEvent(event)
+        val area=starSize+TvUi.dp(context,10)
+        if(event.x<width-area||event.y>area)return super.onTouchEvent(event)
+        if(event.actionMasked==android.view.MotionEvent.ACTION_UP)toggle()
+        return true
     }
 }
