@@ -30,7 +30,7 @@ adb shell am start -n de.iptv.tv/.MainActivity
 
 Ausgaben: `artifacts/RUSTREAM-IPTV-debug.apk` (installierbar und mit Debug-Key signiert), `app/build/outputs/apk/release/app-release-unsigned.apk` und `artifacts/RUSTREAM-IPTV-release-unsigned.aab`. Release-Dateien benötigen vor Distribution einen eigenen Signierschlüssel. Das Projekt veröffentlicht nichts im Store. Die bisherigen `iptv-tv-*`-Dateinamen bleiben als Kompatibilitätskopien vorhanden.
 
-Für die UI-Abnahme liegt außerdem `artifacts/RUSTREAM-IPTV-0.4.1.apk` bereit: die R8-optimierte, am Emulator geprüfte APK mit lokaler Debug-Testsignatur.
+Für die UI-Abnahme liegt außerdem `artifacts/RUSTREAM-IPTV-0.5.0.apk` bereit: die R8-optimierte, am Emulator geprüfte APK mit lokaler Debug-Testsignatur (0.5.0: Sprachauswahl Deutsch/English).
 
 Android TV/Google TV ab Android 6 / API 23; ARM64, ARMv7 und x86_64. Ältere Android-TV-Versionen liegen außerhalb des Minimums der verwendeten Media3-Version. Keine Bindung an TCL oder einen bestimmten SoC. Tatsächliche 4K-/HDR-/Codec-Unterstützung hängt vom Decoder des Geräts ab.
 

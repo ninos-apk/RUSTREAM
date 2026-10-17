@@ -18,8 +18,8 @@ android {
         applicationId = "de.iptv.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.4.2"
+        versionCode = 11
+        versionName = "0.5.0"
         val digest = MessageDigest.getInstance("SHA-256")
         rootProject.fileTree("crates").matching { include("**/*.rs", "**/Cargo.toml") }.files.sortedBy { it.path }.forEach { digest.update(it.readBytes()) }
         buildConfigField("String", "CORE_BUILD_ID", "\"" + digest.digest().joinToString("") { "%02x".format(it) }.take(16) + "\"")

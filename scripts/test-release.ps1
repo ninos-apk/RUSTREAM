@@ -13,6 +13,8 @@ $quotedScript = '"' + "$PSScriptRoot/FixtureHttpServer.java" + '"'
 $quotedFixture = '"' + "$tvRoot/app/src/androidTest/assets/fixture.mp4" + '"'
 $server = Start-Process -FilePath "$env:JAVA_HOME/bin/java.exe" -ArgumentList @($quotedScript, '18888', $quotedFixture) -WindowStyle Hidden -PassThru -RedirectStandardOutput "$tvRoot/.tools/release-server.stdout.log" -RedirectStandardError "$tvRoot/.tools/release-server.stderr.log"
 function Get-Ui {
+    # adb reports "file pulled" on stderr; Windows PowerShell 5.1 would stop on it when output is captured.
+    $ErrorActionPreference = 'Continue'
     & adb -s $Serial shell uiautomator dump /sdcard/Download/iptv-release-ui.xml | Out-Null
     & adb -s $Serial pull /sdcard/Download/iptv-release-ui.xml "$tvRoot/artifacts/release-ui.xml" 2>$null | Out-Null
     return [xml](Get-Content -Raw "$tvRoot/artifacts/release-ui.xml")
