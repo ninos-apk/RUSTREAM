@@ -1,16 +1,47 @@
+# Local toolchains and build caches
 /.tools/
 /target/
 /artifacts/
 /.gradle/
 /.kotlin/
 /**/build/
-/local.properties
+/**/.cxx/
+/**/.externalNativeBuild/
 /app/src/main/jniLibs/
+
+# Local IDE and machine settings
+/local.properties
+.idea/
+*.iml
+/.claude/settings.local.json
+
+# Local environment and signing credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+keystore.properties
+signing.properties
 *.jks
 *.keystore
+*.p12
+*.pfx
+
+# Generated Android packages, logs and heap dumps
+*.apk
+*.aab
+*.apks
+*.idsig
 *.log
-.idea/
+*.hprof
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
 # Private provider lists are supplied separately to the test device.
-app/src/androidTest/assets/*.m3u
-app/src/androidTest/assets/*.m3u8
+/app/src/androidTest/assets/**/*.m3u
+/app/src/androidTest/assets/**/*.m3u8
 
