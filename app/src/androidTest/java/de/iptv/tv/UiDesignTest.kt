@@ -4,7 +4,6 @@ package de.iptv.tv
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.ViewGroup
-import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import androidx.core.view.descendants
 import androidx.media3.exoplayer.ExoPlayer
@@ -12,7 +11,6 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
-import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import kotlinx.coroutines.CoroutineScope
@@ -38,20 +36,6 @@ class UiDesignTest {
         var done=false
         while(!done && SystemClock.elapsedRealtime()<deadline){scenario.onTvActivity { done=check(it) };if(!done)SystemClock.sleep(40)}
         assertTrue(message,done)
-    }
-    /** Dialogs are operated with remote keys, never taps. During a dialog's enter animation its reported
-     * bounds are shifted (37 px down in the settings menu), but a tap is injected only after the animation
-     * and lands beside the target. Keys instead queue until the new dialog owns input focus.
-     */
-    private fun pressFocused(selector:BySelector,timeout:Long=5_000) {
-        assertTrue("Focused: $selector",device.wait(Until.hasObject(selector.focused(true)),timeout))
-        device.pressDPadCenter()
-    }
-    /** requestFocus() for a view of a dialog window, which the activity's view tree does not contain. */
-    private fun focusDialogView(resource:String) {
-        val node=instrumentation.uiAutomation.windows.firstNotNullOfOrNull { it.root?.findAccessibilityNodeInfosByViewId(resource)?.firstOrNull() }
-        assertNotNull("Dialog shows $resource",node)
-        assertTrue("Focus moves to $resource",node!!.performAction(AccessibilityNodeInfo.ACTION_FOCUS))
     }
     @Test fun emptyStartAndInvalidFormKeepLabelsAndInput() {
         val store=SourceStore(context);val old=store.load()

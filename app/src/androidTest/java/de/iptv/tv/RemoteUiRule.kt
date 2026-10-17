@@ -26,6 +26,23 @@ fun finishTvActivity(activity:MainActivity){
     org.junit.Assert.assertTrue("Activity releases playback on finish",activity.isDestroyed)
 }
 
+/** Dialogs are operated with remote keys, never taps. During a dialog's enter animation its reported
+ * bounds are shifted (37 px down in the settings menu), but a tap is injected only after the animation
+ * and lands beside the target. Keys instead queue until the new dialog owns input focus.
+ */
+fun pressFocused(selector:androidx.test.uiautomator.BySelector,timeout:Long=5_000){
+    val device=androidx.test.uiautomator.UiDevice.getInstance(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation())
+    org.junit.Assert.assertTrue("Focused: $selector",device.wait(androidx.test.uiautomator.Until.hasObject(selector.focused(true)),timeout))
+    device.pressDPadCenter()
+}
+/** requestFocus() for a view of a dialog window, which the activity's view tree does not contain. */
+fun focusDialogView(resource:String){
+    val windows=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.windows
+    val node=windows.firstNotNullOfOrNull{it.root?.findAccessibilityNodeInfosByViewId(resource)?.firstOrNull()}
+    org.junit.Assert.assertNotNull("Dialog shows $resource",node)
+    org.junit.Assert.assertTrue("Focus moves to $resource",node!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS))
+}
+
 private val tvActivities=java.util.IdentityHashMap<androidx.test.core.app.ActivityScenario<MainActivity>,MainActivity>()
 fun withTvActivity(block:(androidx.test.core.app.ActivityScenario<MainActivity>)->Unit){
     val scenario=androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java)
