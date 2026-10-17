@@ -1,6 +1,7 @@
-name: Tagged development APK
+name: APK checks and tagged development releases
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v[0-9]*'
@@ -22,18 +23,25 @@ jobs:
       run:
         shell: pwsh
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
 
     steps:
-      - name: Check out the tagged source
+      - name: Check out the selected source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Check that the tag matches the app version
+      - name: Validate the app version and any pushed tag
         id: version
         run: |
-          $release = ./scripts/check-release-tag.ps1 -Tag $env:RELEASE_TAG
+          $tag = $env:RELEASE_TAG
+          if (!$tag) {
+            $source = Get-Content -Raw app/build.gradle.kts
+            $version = [regex]::Match($source, '(?m)^\s*versionName\s*=\s*"([^"\r\n]+)"\s*$').Groups[1].Value
+            if (!$version) { throw 'App version missing from source' }
+            $tag = "v$version"
+          }
+          $release = ./scripts/check-release-tag.ps1 -Tag $tag
           "version=$($release.Version)" >> $env:GITHUB_OUTPUT
           "code=$($release.VersionCode)" >> $env:GITHUB_OUTPUT
 
@@ -100,6 +108,7 @@ jobs:
           "$hash  $([IO.Path]::GetFileName($apk))" | Set-Content -Encoding ascii "$apk.sha256"
 
       - name: Publish the tagged development prerelease
+        if: ${{ success() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

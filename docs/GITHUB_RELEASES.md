@@ -1,6 +1,39 @@
 # Tagged development APKs
 
-Only pushing a version tag triggers `.github/workflows/tagged-apk.yml`. Normal pushes to `main` do not publish anything and do not increment versions automatically. Every tagged build checks out that exact commit, runs the Rust/JVM checks and Android lint, builds all three Android ABIs, signs an optimized APK and attaches it plus its SHA-256 checksum to a GitHub **prerelease**. Development builds are not marked Latest and are not submitted to an app store.
+Pushing a version tag or starting a manual check triggers `.github/workflows/tagged-apk.yml`. Normal pushes to `main` do not publish anything and do not increment versions automatically. Every tagged build checks out that exact commit, runs the Rust/JVM checks and Android lint, builds all three Android ABIs, signs an optimized APK and attaches it plus its SHA-256 checksum to a GitHub **prerelease**. Development builds are not marked Latest and are not submitted to an app store.
+
+## Check on GitHub before releasing
+
+1. Open [the APK workflow in GitHub Actions](https://github.com/ninos-apk/RUSTREAM/actions/workflows/tagged-apk.yml).
+2. Click **Run workflow**, select `main` (or the branch you want to check) and start the run.
+3. Open the run to inspect each step. A successful manual run finishes without creating a tag, release or release asset.
+
+The manual check uses the same build and verification steps as a tagged release:
+
+- Rust formatting, Clippy and the Rust workspace tests.
+- Android JVM unit tests and Android lint.
+- The optimized release APK with ARM64, ARMv7 and x86_64 native libraries.
+- Development signing, signature verification, APK version checks, JNI exports and 16-KiB alignment.
+
+Android emulator/instrumentation tests and checks on a physical TV are separate and are not included in this workflow. Run those locally using the existing device-test scripts when needed.
+
+**If a setup step, test, lint check, build, signing operation or verification fails, the publication step is skipped.** Publication additionally requires a successful tag-push event; a manual run cannot publish even when every check passes. Existing releases are left unchanged. Once satisfied with the results, tag the same source commit and push the tag. The tag run repeats all checks before publishing its prerelease.
+
+## Setup status and first release
+
+On **17 October 2026**, the workflow was committed and pushed to `main`, and the encrypted repository Actions secret `DEVELOPMENT_KEYSTORE_BASE64` was configured and verified in `ninos-apk/RUSTREAM`. It contains the existing development signing key, which remains outside Git. The one-time signing setup below is already complete; it only needs repeating if you deliberately replace or remove the secret.
+
+No release tag or GitHub release was created as part of that setup. To start the first development release from the committed `0.5.0` source, run:
+
+```powershell
+git switch main
+git status
+git push origin main
+git tag -a v0.5.0 -m "RUSTREAM IPTV PLAYER 0.5.0 development"
+git push origin v0.5.0
+```
+
+Create the tag only after all intended changes are committed. The workflow builds the commit marked by the tag. Follow the build in [GitHub Actions](https://github.com/ninos-apk/RUSTREAM/actions/workflows/tagged-apk.yml), then find the matching APK and checksum under [GitHub Releases](https://github.com/ninos-apk/RUSTREAM/releases). A manual run can verify the GitHub-hosted build before creating a release tag.
 
 ## One-time signing setup
 
