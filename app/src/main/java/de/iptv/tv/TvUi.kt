@@ -130,7 +130,7 @@ class TvIconButton(context: Context, var symbol: String, description: String, ac
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val size = TvUi.dp(context, if (symbol == "back" || symbol == "forward") 30 else 23).toFloat()
+        val size = TvUi.dp(context, if (symbol == "back" || symbol == "forward") 28 else 23).toFloat()
         canvas.save(); canvas.translate((width - size) / 2, (height - size) / 2); canvas.scale(size / 24, size / 24)
         paint.color = if (isEnabled) Color.WHITE else TvUi.muted
         paint.alpha = if (isEnabled) 255 else 80
@@ -140,12 +140,15 @@ class TvIconButton(context: Context, var symbol: String, description: String, ac
             "pause" -> { paint.style = Paint.Style.FILL; canvas.drawRoundRect(6f,4f,10f,20f,1f,1f,paint); canvas.drawRoundRect(14f,4f,18f,20f,1f,1f,paint) }
             "stop" -> { paint.style = Paint.Style.FILL; canvas.drawRoundRect(5f,5f,19f,19f,2f,2f,paint) }
             "back", "forward" -> {
+                // Circular arrow opening at the top, the filled head turning into the gap.
+                // Forward mirrors the arrow only; the number stays upright and centred.
                 if (symbol == "forward") { canvas.save(); canvas.scale(-1f,1f,12f,12f) }
-                canvas.drawArc(iconBounds.apply { set(2f,2f,22f,22f) },-65f,290f,false,paint)
-                canvas.drawPath(iconPath.apply { reset(); moveTo(2f,1f); lineTo(2f,7f); lineTo(8f,7f) },paint)
+                canvas.drawArc(iconBounds.apply { set(3.5f,4f,20.5f,21f) },-90f,300f,false,paint)
+                paint.style = Paint.Style.FILL
+                canvas.drawPath(iconPath.apply { reset(); moveTo(8.4f,4f); lineTo(12.9f,1.4f); lineTo(12.9f,6.6f); close() },paint)
                 if (symbol == "forward") canvas.restore()
-                paint.style = Paint.Style.FILL; paint.textSize = 10f; paint.typeface = Typeface.DEFAULT_BOLD; paint.textAlign = Paint.Align.CENTER
-                canvas.drawText("30",12f,16f,paint)
+                paint.textSize = 7.6f; paint.typeface = Typeface.DEFAULT_BOLD; paint.textAlign = Paint.Align.CENTER
+                canvas.drawText("30",12f,12.5f-(paint.descent()+paint.ascent())/2,paint)
             }
             "reconnect" -> {
                 canvas.drawArc(iconBounds.apply { set(4f,4f,20f,20f) },30f,290f,false,paint)

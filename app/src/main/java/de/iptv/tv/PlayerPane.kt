@@ -109,12 +109,8 @@ class PlayerPane(
             TvUi.focus(button, 1f) { focused -> if (focused) { caption.text = button.contentDescription; touch() } }
             buttons[key] = button
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            // The ±30 icons carry their number; extra labels pushed them above the other buttons.
             column.addView(button, LinearLayout.LayoutParams(dp(44), dp(42)))
-            if (key == "back" || key == "forward") {
-                column.addView(TvUi.text(context, if (key == "back") "−30 s" else "+30 s", 12f).apply {
-                    gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                }, LinearLayout.LayoutParams(-1, -2))
-            }
             controls.addView(column, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(2), dp(4), dp(2), dp(4)) })
         }
         val ordered = buttons.values.toList()
