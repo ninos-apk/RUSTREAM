@@ -156,7 +156,7 @@ class MainActivity : ComponentActivity() {
     private var firstChannelFocus = true
     private var lifecycleWork: Job? = null
     private val channelRows = Rows(true) { item -> when{
-        !item.available->status.text="„${item.title}“ ist in der aktuellen Liste nicht verfügbar · Lange OK zum Entfernen"
+        !item.available->status.text=getString(R.string.item_unavailable,item.title)
         item.series->openSeries(item.id);kind=="movies"->openMovie(item);else->selectChannel(item.id)} }
     private val categoryRows = Rows { item ->
         closeSeries(false,false)
@@ -170,17 +170,20 @@ class MainActivity : ComponentActivity() {
         /** Remembered entries missing from the current list get ids below this value. */
         const val UNAVAILABLE_BASE=-1000L
         const val STATUS="status"
+        /** Category name the Rust core assigns to entries without a group. */
+        const val UNCATEGORIZED="Ohne Kategorie"
     }
 
+    override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(AppLanguage.wrap(newBase)) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         loader = SourceLoader(applicationContext); store = SourceStore(this); epgStore = SourceStore(this, "epg.enc")
         try { core = Core() } catch (_: Throwable) {
-            setContentView(TextView(this).apply { text = "Rust-Core konnte nicht geladen werden. Passendes APK installieren."; textSize = 24f; setPadding(48,48,48,48) }); return
+            setContentView(TextView(this).apply { setText(R.string.core_missing); textSize = 24f; setPadding(48,48,48,48) }); return
         }
         buildUi()
-        loader.progress = { message -> scope.launch { if(busy) { status.text=message; startup.updateProgress(message) } } }
+        loader.progress = { res -> scope.launch { if(busy) { val message=getString(res); status.text=message; startup.updateProgress(message) } } }
         playback = PlaybackController(this, core, scope, video, { status.text = it }, { stats ->
             playerPane.hasSelection = selectedId != null
             playerPane.update(stats)
@@ -198,7 +201,7 @@ class MainActivity : ComponentActivity() {
     private fun startLibrary() {
         if (startupWork?.isActive == true) return
         chrome.visibility = View.INVISIBLE
-        startup.showLoading("Gespeicherte Quelle wird geladen …")
+        startup.showLoading(getString(R.string.loading_saved_source))
         startupWork = launchSafe {
             if (!userLibraryLoaded) {
                 // Before the catalog opens, so the first list already shows stars and progress.
@@ -236,56 +239,56 @@ class MainActivity : ComponentActivity() {
         toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
         toolbar.addView(label(getString(R.string.app_name).replace(" ","\n"),14f).apply { letterSpacing = 0.06f; setTypeface(typeface,android.graphics.Typeface.BOLD);contentDescription=getString(R.string.app_name) }, LinearLayout.LayoutParams(dp(if(largeText)190 else 120),-2))
         val tabs=LinearLayout(this)
-        for ((key,title) in listOf("live" to "Live","movies" to "Movies","series" to "Series","unclassified" to "Unzugeordnet")) {
-            val tab = button(title) { switchKind(key) }
+        for ((key,title) in listOf("live" to R.string.tab_live,"movies" to R.string.tab_movies,"series" to R.string.tab_series,"unclassified" to R.string.tab_unclassified)) {
+            val tab = button(getString(title)) { switchKind(key) }
             kindButtons[key] = tab
             tabs.addView(tab,LinearLayout.LayoutParams(-2,-2).apply { marginEnd=dp(6) })
             if(key=="unclassified")tab.visibility=View.GONE
         }
         toolbar.addView(HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;addView(tabs)},LinearLayout.LayoutParams(0,-2,1f))
-        settingsButton = TvIconButton(this,"settings","Einstellungen") { settingsDialog() }.apply { id = View.generateViewId() }
+        settingsButton = TvIconButton(this,"settings",getString(R.string.settings)) { settingsDialog() }.apply { id = View.generateViewId() }
         toolbar.addView(settingsButton,LinearLayout.LayoutParams(dp(36),dp(36)))
         chrome.addView(toolbar,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         val body = LinearLayout(this)
         sidebar = LinearLayout(this)
-        categories = list(categoryRows).apply { contentDescription = "Kategorienliste" }
-        channels = list(channelRows).apply { contentDescription = "Eintragsliste" }
+        categories = list(categoryRows).apply { contentDescription = getString(R.string.categories_list) }
+        channels = list(channelRows).apply { contentDescription = getString(R.string.entries_list) }
         val categoryColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(5),dp(5),dp(5),0); background = TvUi.surface(TvUi.panel,dp(7).toFloat()) }
-        categoryColumn.addView(label("Kategorien",12f).apply { setTextColor(TvUi.muted); setPadding(dp(4),dp(4),dp(4),dp(6)) },LinearLayout.LayoutParams(-1,-2))
-        categorySearch = searchField("Kategorie suchen") { renderCategories() }
+        categoryColumn.addView(label(getString(R.string.categories),12f).apply { setTextColor(TvUi.muted); setPadding(dp(4),dp(4),dp(4),dp(6)) },LinearLayout.LayoutParams(-1,-2))
+        categorySearch = searchField(getString(R.string.search_categories)) { renderCategories() }
         categoryColumn.addView(categorySearch,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
-        categoryEmpty = label("Keine Kategorien gefunden",12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
+        categoryEmpty = label(getString(R.string.categories_none),12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
         categoryColumn.addView(categoryEmpty)
         categoryColumn.addView(categories,LinearLayout.LayoutParams(-1,0,1f))
         browserColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(5),dp(5),dp(5),0); background = TvUi.surface(TvUi.panel,dp(7).toFloat()) }
-        channelHeading = label("Alle Kategorien",12f).apply { maxLines=1; ellipsize=TextUtils.TruncateAt.END }
+        channelHeading = label(getString(R.string.category_all),12f).apply { maxLines=1; ellipsize=TextUtils.TruncateAt.END }
         channelHeading.setPadding(dp(4),dp(4),dp(4),dp(6))
         browserColumn.addView(channelHeading,LinearLayout.LayoutParams(-1,-2))
-        channelSearch = searchField("Sender suchen") {
+        channelSearch = searchField(getString(R.string.search_channels)) {
             if(openedSeries!=null||openedMovie!=null)closeSeries(false,false)
             query=channelSearch.text.toString(); offset=0; searchGeneration++
             searchWork?.cancel(); searchWork=scope.launch { delay(200); search() }
         }
         browserColumn.addView(channelSearch,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(6) })
-        channelEmpty = label("Keine Einträge gefunden",12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
+        channelEmpty = label(getString(R.string.entries_none),12f).apply { visibility=View.GONE; setTextColor(TvUi.muted) }
         browserColumn.addView(channelEmpty)
-        clearFiltersButton = button("Suche zurücksetzen") {
+        clearFiltersButton = button(getString(R.string.reset_search)) {
             closeSeries(false,false)
             category=null; special=null; query=""; categorySearch.setText(""); channelSearch.setText("")
             searchWork?.cancel(); renderCategories(); search(); channelSearch.requestFocus()
         }.apply { visibility=View.GONE }
         browserColumn.addView(clearFiltersButton,LinearLayout.LayoutParams(-1,-2))
         seriesHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
-        seriesHeader.addView(button("← Serienbibliothek"){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
+        seriesHeader.addView(button(getString(R.string.back_series_library)){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
         seriesTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8));maxLines=3}
         seriesPoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
         seriesHeader.addView(seriesPoster,LinearLayout.LayoutParams(-1,dp(56)))
         seriesHeader.addView(seriesTitle)
-        seriesResume=button("Fortsetzen"){resumeSeries()}.apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END;visibility=View.GONE}
+        seriesResume=button(getString(R.string.resume)){resumeSeries()}.apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END;visibility=View.GONE}
         seriesHeader.addView(seriesResume,LinearLayout.LayoutParams(-1,-2))
         // Season choice and the show's star share one row; episodes keep their vertical space.
         val seasonRow=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
-        seasonButton=button("Staffel wählen"){chooseSeason()}
+        seasonButton=button(getString(R.string.choose_season)){chooseSeason()}
         seasonRow.addView(seasonButton,LinearLayout.LayoutParams(0,-2,1f))
         seriesFavorite=button("☆"){openedSeriesKey?.let{toggleFavorite(LibrarySection.SERIES,it,openedSeriesName)}}.apply{textSize=16f}
         seriesFavorite.minWidth=dp(44);seriesFavorite.minimumWidth=dp(44)
@@ -293,7 +296,7 @@ class MainActivity : ComponentActivity() {
         seriesHeader.addView(seasonRow,LinearLayout.LayoutParams(-1,-2))
         browserColumn.addView(seriesHeader,LinearLayout.LayoutParams(-1,-2))
         movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
-        movieHeader.addView(button("← Filmbibliothek"){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
+        movieHeader.addView(button(getString(R.string.back_movie_library)){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
         moviePoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
         movieHeader.addView(moviePoster,LinearLayout.LayoutParams(-1,dp(100)))
         movieTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8))}
@@ -301,16 +304,16 @@ class MainActivity : ComponentActivity() {
         movieProgress=label("",12f).apply{setTextColor(TvUi.muted);setPadding(dp(6),0,dp(6),dp(6));visibility=View.GONE}
         movieHeader.addView(movieProgress)
         // Saved progress resumes automatically; "from the start" ignores it.
-        moviePlay=button("Abspielen"){openedMovie?.let{selectChannel(it.id)}}
+        moviePlay=button(getString(R.string.play)){openedMovie?.let{selectChannel(it.id)}}
         movieHeader.addView(moviePlay,LinearLayout.LayoutParams(-1,-2))
-        movieRestart=button("Von Anfang an"){openedMovie?.let{selectChannel(it.id,fromStart=true)}}.apply{visibility=View.GONE}
+        movieRestart=button(getString(R.string.play_from_start)){openedMovie?.let{selectChannel(it.id,fromStart=true)}}.apply{visibility=View.GONE}
         movieHeader.addView(movieRestart,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
-        movieFavorite=button("☆ Zu Favoriten"){openedMovie?.let{row->row.key?.let{toggleFavorite(LibrarySection.MOVIES,it,row.title)}}}
+        movieFavorite=button("☆ "+getString(R.string.favorite_add)){openedMovie?.let{row->row.key?.let{toggleFavorite(LibrarySection.MOVIES,it,row.title)}}}
         movieHeader.addView(movieFavorite,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
         movieScroll=ScrollView(this).apply{isFillViewport=false;visibility=View.GONE;addView(movieHeader)}
         browserColumn.addView(movieScroll,LinearLayout.LayoutParams(-1,0,1f))
         browserColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
-        resultCount=label("0 Einträge",10f).apply { setTextColor(TvUi.muted) }
+        resultCount=label(resources.getQuantityString(R.plurals.entries_count,0,0),10f).apply { setTextColor(TvUi.muted) }
         browserColumn.addView(resultCount,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
         sidebar.addView(categoryColumn,LinearLayout.LayoutParams(dp(if(largeText)210 else 148),-1))
         sidebar.addView(browserColumn,LinearLayout.LayoutParams(dp(if(largeText)260 else 216),-1).apply { marginStart=dp(7); marginEnd=dp(12) })
@@ -321,12 +324,12 @@ class MainActivity : ComponentActivity() {
         video=playerPane.video
         playerSlot.addView(playerPane,FrameLayout.LayoutParams(-1,-1))
         mediaColumn.addView(playerSlot,LinearLayout.LayoutParams(-1,0,1f))
-        status=label("Sender wählen",13f).apply {
+        status=label(getString(R.string.choose_channel),13f).apply {
             maxLines=2; ellipsize=TextUtils.TruncateAt.END; setPadding(dp(6),dp(5),dp(6),dp(5))
             TvUi.focus(this,1f); setOnClickListener { showProgrammeDetails() }
         }
         mediaColumn.addView(status,LinearLayout.LayoutParams(-1,-2))
-        epg=label("Sender wählen, um das Programm anzuzeigen",12f).apply { maxLines=2; setTextColor(TvUi.muted); ellipsize=TextUtils.TruncateAt.END }
+        epg=label(getString(R.string.epg_hint),12f).apply { maxLines=2; setTextColor(TvUi.muted); ellipsize=TextUtils.TruncateAt.END }
         epg.setPadding(dp(6),dp(4),dp(6),dp(4))
         TvUi.focus(epg,1f); epg.setOnClickListener { showProgrammeDetails() }
         mediaColumn.addView(epg,LinearLayout.LayoutParams(-1,-2))
@@ -358,23 +361,24 @@ class MainActivity : ComponentActivity() {
         })
     }
     private fun settingsDialog() {
-        val choices=arrayOf("Quellen verwalten","Datei hinzufügen","URL hinzufügen","Xtream anmelden","EPG importieren","Bilddarstellung","Live-Pufferprofil","Zuletzt gesehen · Anzahl","Diagnosebericht",getString(R.string.app_info))
+        val choices=listOf(R.string.settings_sources,R.string.settings_add_file,R.string.settings_add_url,R.string.settings_xtream,R.string.settings_epg,R.string.settings_picture,
+            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info).map { getString(it) }
         val dialog=AlertDialog.Builder(this).create()
         val menu=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
             background=TvUi.surface(TvUi.panel,dp(10).toFloat())
         }
-        menu.addView(label("Einstellungen",20f),LinearLayout.LayoutParams(-1,-2))
-        menu.addView(label("Quellen & Wiedergabe",12f).apply { setTextColor(TvUi.muted); setPadding(0,dp(10),0,dp(10)) },LinearLayout.LayoutParams(-1,-2))
+        menu.addView(label(getString(R.string.settings),20f),LinearLayout.LayoutParams(-1,-2))
+        menu.addView(label(getString(R.string.settings_section),12f).apply { setTextColor(TvUi.muted); setPadding(0,dp(10),0,dp(10)) },LinearLayout.LayoutParams(-1,-2))
         val actions=choices.mapIndexed { index,choice ->
             button(choice) {
                     dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->diagnosticsDialog(); 9->appInfoDialog() }
+                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog() }
             }.apply {
                 menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
             }
         }
-        menu.addView(label("Zurück zum Schließen",11f).apply { setTextColor(TvUi.muted); setPadding(0,dp(8),0,0) },LinearLayout.LayoutParams(-1,-2))
+        menu.addView(label(getString(R.string.settings_back_hint),11f).apply { setTextColor(TvUi.muted); setPadding(0,dp(8),0,0) },LinearLayout.LayoutParams(-1,-2))
         dialog.setView(ScrollView(this).apply { isFillViewport=false; addView(menu) },0,0,0,0)
         dialog.setOnDismissListener { if(startup.visibility==View.VISIBLE) startup.focusPrimary() else settingsButton.requestFocus() }
         dialog.show()
@@ -387,12 +391,12 @@ class MainActivity : ComponentActivity() {
         actions.first().requestFocus()
     }
     private fun pictureDialog() {
-        AlertDialog.Builder(this).setTitle("Bilddarstellung im Vollbild")
-            .setSingleChoiceItems(arrayOf("Bild füllen · proportional zuschneiden","Originalformat · vollständiges Bild"),if(fillVideo)0 else 1) { dialog,index ->
+        AlertDialog.Builder(this).setTitle(R.string.picture_title)
+            .setSingleChoiceItems(arrayOf(getString(R.string.picture_fill),getString(R.string.picture_fit)),if(fillVideo)0 else 1) { dialog,index ->
                 fillVideo=index==0
                 getPreferences(MODE_PRIVATE).edit().putBoolean("fillVideo",fillVideo).apply()
                 dialog.dismiss()
-            }.setNegativeButton("Schließen",null).show()
+            }.setNegativeButton(R.string.close,null).show()
     }
     private fun appInfoDialog(){
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(20),dp(12),dp(20),dp(20))}
@@ -404,26 +408,38 @@ class MainActivity : ComponentActivity() {
         content.addView(label(getString(R.string.app_version,BuildConfig.VERSION_NAME),12f).apply{setTextColor(TvUi.muted)})
         content.addView(label(getString(R.string.app_developer),12f).apply{setTextColor(TvUi.muted);setPadding(0,dp(6),0,0)})
         AlertDialog.Builder(this).setTitle(R.string.app_name).setView(ScrollView(this).apply{addView(content)})
-            .setPositiveButton("Schließen"){_,_->settingsButton.requestFocus()}.show()
+            .setPositiveButton(R.string.close){_,_->settingsButton.requestFocus()}.show()
     }
     private fun bufferDialog() {
         val profiles = PlaybackBufferProfile.entries
-        AlertDialog.Builder(this).setTitle("Live-Puffer · ab nächstem Verbindungsaufbau")
-            .setSingleChoiceItems(profiles.map { it.label }.toTypedArray(), profiles.indexOf(playback.bufferProfile)) { dialog, index ->
+        AlertDialog.Builder(this).setTitle(R.string.buffer_title)
+            .setSingleChoiceItems(profiles.map { getString(it.label) }.toTypedArray(), profiles.indexOf(playback.bufferProfile)) { dialog, index ->
                 playback.bufferProfile = profiles[index]
                 getPreferences(MODE_PRIVATE).edit().putString("liveBufferProfile", profiles[index].key).apply()
                 dialog.dismiss()
-            }.setNegativeButton("Schließen", null).show()
+            }.setNegativeButton(R.string.close, null).show()
     }
     private fun historyDialog() {
         val choices=UserLibrary.LIMIT_CHOICES
-        AlertDialog.Builder(this).setTitle("„Zuletzt gesehen“ · Einträge je Bereich")
-            .setSingleChoiceItems(choices.map { "$it Einträge" }.toTypedArray(), choices.indexOf(userLibrary.historyLimit)) { dialog, index ->
+        AlertDialog.Builder(this).setTitle(R.string.history_title)
+            .setSingleChoiceItems(choices.map { resources.getQuantityString(R.plurals.entries_count,it,it) }.toTypedArray(), choices.indexOf(userLibrary.historyLimit)) { dialog, index ->
                 getPreferences(MODE_PRIVATE).edit().putInt("historyLimit", choices[index]).apply()
                 // Lowering trims immediately; progress and favourites stay untouched.
                 userLibrary.historyLimit = choices[index]
                 dialog.dismiss()
-            }.setNegativeButton("Schließen", null).show()
+            }.setNegativeButton(R.string.close, null).show()
+    }
+    /** A new language rebuilds the activity: every view, dialog and status text is created in it.
+     * Progress is flushed in onStop and the catalog reopens from its local copy. */
+    private fun languageDialog() {
+        val choices=AppLanguage.choices
+        val current=AppLanguage.current(this)
+        AlertDialog.Builder(this).setTitle(R.string.language_title)
+            .setSingleChoiceItems(choices.map { it.second }.toTypedArray(), choices.indexOfFirst { it.first==current }) { dialog, index ->
+                dialog.dismiss()
+                val chosen=choices[index].first
+                if(chosen!=current){ AppLanguage.save(this,chosen); recreate() }
+            }.setNegativeButton(R.string.close, null).show()
     }
     /** [fromStart] ignores saved progress; otherwise VOD continues where it stopped. */
     private fun selectChannel(id: Long, preserveContext:Boolean=false, fromStart:Boolean=false) {
@@ -532,18 +548,18 @@ class MainActivity : ComponentActivity() {
         val progress=if(source!=null&&row.key!=null)userLibrary.progress(source,row.key) else null
         val playing=row.id==selectedId&&playback.player!=null
         val resume=progress?.resumeSec
-        moviePlay.text=when{playing->"Wiedergabe öffnen";resume!=null->"Fortsetzen bei ${TvUi.clock(resume)}";progress?.done==true->"Erneut abspielen";else->"Abspielen"}
+        moviePlay.text=when{playing->getString(R.string.open_playback);resume!=null->getString(R.string.resume_at,TvUi.clock(resume));progress?.done==true->getString(R.string.play_again);else->getString(R.string.play)}
         movieRestart.visibility=if(!playing&&resume!=null)View.VISIBLE else View.GONE
         movieProgress.text=when{
             progress==null->""
-            progress.done->"✓ Bereits gesehen"
+            progress.done->getString(R.string.watched_done)
             resume==null->""
-            else->progress.durationSec?.let{"Gesehen: ${TvUi.clock(resume)} von ${TvUi.clock(it)}"} ?: "Gesehen bis ${TvUi.clock(resume)}"
+            else->progress.durationSec?.let{getString(R.string.watched_of,TvUi.clock(resume),TvUi.clock(it))} ?: getString(R.string.watched_until,TvUi.clock(resume))
         }
         movieProgress.visibility=if(movieProgress.text.isEmpty())View.GONE else View.VISIBLE
         val favorite=source!=null&&row.key!=null&&userLibrary.isFavorite(source,LibrarySection.MOVIES,row.key)
         movieFavorite.visibility=if(source!=null&&row.key!=null)View.VISIBLE else View.GONE
-        movieFavorite.text=if(favorite)"★ Aus Favoriten entfernen" else "☆ Zu Favoriten hinzufügen"
+        movieFavorite.text=if(favorite)"★ "+getString(R.string.favorite_remove) else "☆ "+getString(R.string.favorite_add)
         movieFavorite.isActivated=true;movieFavorite.isSelected=favorite
     }
     private fun updateSeriesActions(){
@@ -553,11 +569,11 @@ class MainActivity : ComponentActivity() {
         val episodeKey=last?.episodeKey
         if(source==null||episodeKey==null){seriesResume.visibility=View.GONE}else{
             val progress=userLibrary.progress(source,episodeKey)
-            val label=last.episodeLabel ?: "Letzte Episode"
+            val label=last.episodeLabel ?: getString(R.string.last_episode)
             seriesResume.text=when{
-                progress?.done==true->"↻ $label erneut ansehen"
-                progress?.resumeSec!=null->"▶ Fortsetzen · $label · ${TvUi.clock(progress.resumeSec!!)}"
-                else->"▶ Fortsetzen · $label"
+                progress?.done==true->getString(R.string.series_rewatch,label)
+                progress?.resumeSec!=null->getString(R.string.series_resume_at,label,TvUi.clock(progress.resumeSec!!))
+                else->getString(R.string.series_resume,label)
             }+(last.episodeTitle?.let{"\n$it"}?:"")
             seriesResume.contentDescription=seriesResume.text.toString().replace("\n"," · ")
             seriesResume.visibility=View.VISIBLE
@@ -565,7 +581,7 @@ class MainActivity : ComponentActivity() {
         val favorite=source!=null&&key!=null&&userLibrary.isFavorite(source,LibrarySection.SERIES,key)
         seriesFavorite.visibility=if(source!=null&&key!=null)View.VISIBLE else View.GONE
         seriesFavorite.text=if(favorite)"★" else "☆"
-        seriesFavorite.contentDescription=if(favorite)"Serie aus Favoriten entfernen" else "Serie zu Favoriten hinzufügen"
+        seriesFavorite.contentDescription=getString(if(favorite)R.string.series_favorite_remove else R.string.series_favorite_add)
         seriesFavorite.setTextColor(if(favorite)TvUi.accent else Color.WHITE)
     }
     private fun resumeSeries(){
@@ -576,7 +592,7 @@ class MainActivity : ComponentActivity() {
         launchSafe {
             val item=resolveKeys(rev,listOf(episodeKey)).first[episodeKey]
             if(rev!=revision||openedSeriesKey!=key)return@launchSafe
-            if(item==null){status.text="Die zuletzt gesehene Episode ist in der aktuellen Liste nicht verfügbar.";return@launchSafe}
+            if(item==null){status.setText(R.string.last_episode_unavailable);return@launchSafe}
             val season=item.takeIf{!it.isNull("season")}?.optLong("season")
             // Channel +/- then continues within the season of the resumed episode.
             if(season!=chosenSeason||unknownSeason!=(season==null)){chosenSeason=season;unknownSeason=season==null;updateSeasonLabel();libraryFocusId=null;search()}
@@ -638,7 +654,7 @@ class MainActivity : ComponentActivity() {
         resultCount.visibility=if(openedMovie!=null)View.GONE else View.VISIBLE
         channelSearch.visibility=if(!gridMode&&kind!="live")View.GONE else View.VISIBLE
         channelHeading.visibility=channelSearch.visibility
-        channels.contentDescription=if(openedSeries!=null)"Episodenliste" else if(shouldGrid)"${if(kind=="series")"Serien" else "Film"}bibliothek" else "Eintragsliste"
+        channels.contentDescription=getString(if(openedSeries!=null)R.string.episodes_list else if(shouldGrid)(if(kind=="series")R.string.series_library else R.string.movie_library) else R.string.entries_list)
         channels.post{updateGridColumns()}
     }
     private fun openMovie(row:Row){
@@ -660,12 +676,12 @@ class MainActivity : ComponentActivity() {
             val providerId=data.optString("series_id").takeIf{it.isNotEmpty()&&it!="null"}
             if(data.getInt("total")==0&&providerId!=null){
                 val source=activeSource ?: return@launchSafe
-                status.text="Episoden werden geladen …"
+                status.setText(R.string.loading_episodes)
                 loader.episodes(source,core,rev,id,providerId)
                 data=core.call("series_page","revision" to rev,"id" to id,"offset" to 0)
             }
             if(rev!=revision||generation!=searchGeneration)return@launchSafe
-            if(status.text.toString()=="Episoden werden geladen …")status.text="${data.getInt("total")} Episoden verfügbar"
+            if(status.text.toString()==getString(R.string.loading_episodes))status.text=resources.getQuantityString(R.plurals.episodes_available,data.getInt("total"),data.getInt("total"))
             browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
             openedSeries=id;seasonOffset=0;seriesSeasons=data.getJSONArray("seasons");seasonTotal=data.getInt("season_total")
             openedSeriesKey=data.optString("key").takeIf{it.isNotEmpty()&&it!="null"};openedSeriesName=data.getString("name")
@@ -675,7 +691,7 @@ class MainActivity : ComponentActivity() {
                 .firstOrNull{lastSeason!=null&&!it.isNull("season")&&it.getLong("season")==lastSeason} ?: seriesSeasons.optJSONObject(0)
             chosenSeason=if(first==null||first.isNull("season"))null else first.getLong("season")
             unknownSeason=first?.isNull("season")==true
-            val summary="${data.getString("name")}\n$seasonTotal Staffeln · ${data.getInt("total")} Episoden"
+            val summary="${data.getString("name")}\n${resources.getQuantityString(R.plurals.seasons_count,seasonTotal,seasonTotal)} · ${resources.getQuantityString(R.plurals.episodes_count,data.getInt("total"),data.getInt("total"))}"
             seriesTitle.text=if(resources.configuration.fontScale>1.3f)data.getString("name") else summary
             seriesTitle.maxLines=if(resources.configuration.fontScale>1.3f)2 else 3
             seriesTitle.ellipsize=TextUtils.TruncateAt.END
@@ -685,19 +701,19 @@ class MainActivity : ComponentActivity() {
             libraryFocusId=null;search();channels.scrollToPosition(0)
         }
     }
-    private fun updateSeasonLabel(){seasonButton.text=if(unknownSeason)"Ohne Staffelnummer ▾" else chosenSeason?.let{"Staffel $it ▾"}?:"Staffel wählen ▾"}
+    private fun updateSeasonLabel(){seasonButton.text=if(unknownSeason)getString(R.string.season_unknown_menu) else chosenSeason?.let{getString(R.string.season_menu,it)}?:getString(R.string.choose_season_menu)}
     private fun chooseSeason(){
         val id=openedSeries ?: return
         fun showPage(){
             val labels=Array(seriesSeasons.length()){i->val entry=seriesSeasons.getJSONObject(i)
-                "${if(entry.isNull("season"))"Ohne Staffelnummer" else "Staffel ${entry.getLong("season")}"} (${entry.getInt("count")})"}
-            val dialog=AlertDialog.Builder(this).setTitle("Staffel wählen").setItems(labels){_,index->
+                "${if(entry.isNull("season"))getString(R.string.season_unknown) else getString(R.string.season,entry.getLong("season"))} (${entry.getInt("count")})"}
+            val dialog=AlertDialog.Builder(this).setTitle(R.string.choose_season).setItems(labels){_,index->
                 val entry=seriesSeasons.getJSONObject(index);unknownSeason=entry.isNull("season")
                 chosenSeason=if(unknownSeason)null else entry.getLong("season")
                 updateSeasonLabel();libraryFocusId=null;firstChannelFocus=true;search();channels.scrollToPosition(0)
-            }.setNegativeButton("Schließen",null)
-            if(seasonOffset+seriesSeasons.length()<seasonTotal)dialog.setPositiveButton("Weitere Staffeln"){_,_->loadSeasonPage(id,seasonOffset+128)}
-            if(seasonOffset>0)dialog.setNeutralButton("Vorherige Staffeln"){_,_->loadSeasonPage(id,(seasonOffset-128).coerceAtLeast(0))}
+            }.setNegativeButton(R.string.close,null)
+            if(seasonOffset+seriesSeasons.length()<seasonTotal)dialog.setPositiveButton(R.string.seasons_more){_,_->loadSeasonPage(id,seasonOffset+128)}
+            if(seasonOffset>0)dialog.setNeutralButton(R.string.seasons_previous){_,_->loadSeasonPage(id,(seasonOffset-128).coerceAtLeast(0))}
             dialog.show()
         }
         showPage()
@@ -723,7 +739,7 @@ class MainActivity : ComponentActivity() {
         if(restore&&snapshot!=null){
             offset=(snapshot.index/64)*64;total=snapshot.total;channelRows.replace(emptyList())
             libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
-            resultCount.text=if(kind=="series")if(total==1)"1 Serie" else "$total Serien" else "$total Filme";channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
+            resultCount.text=resources.getQuantityString(if(kind=="series")R.plurals.series_count else R.plurals.movies_count,total,total);channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
             val rev=revision;val start=offset;val section=kind;val group=category;val text=query;val list=special
             launchSafe{
                 val data=fetchRows(rev,section,group,text,start,64,list)
@@ -824,13 +840,13 @@ class MainActivity : ComponentActivity() {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 val details=ImportErrors.describe(error)
                 lastFailure=details.json().put("exception_type",error.javaClass.simpleName)
-                val message=details.message
+                val message=details.message(this@MainActivity)
                 status.text = message
                 if (!libraryReady) {
                     chrome.visibility=View.INVISIBLE; startup.showError(message)
-                } else AlertDialog.Builder(this@MainActivity).setTitle("Vorgang fehlgeschlagen").setMessage(message)
-                    .setNeutralButton("Details"){_,_->diagnosticsDialog()}
-                    .setPositiveButton("Quelle wählen"){_,_->chooseSources()}.setNegativeButton("Schließen", null).show()
+                } else AlertDialog.Builder(this@MainActivity).setTitle(R.string.operation_failed).setMessage(message)
+                    .setNeutralButton(R.string.details){_,_->diagnosticsDialog()}
+                    .setPositiveButton(R.string.source_choose){_,_->chooseSources()}.setNegativeButton(R.string.close, null).show()
             }
         }
     }
@@ -838,9 +854,9 @@ class MainActivity : ComponentActivity() {
         if (busy) return
         if(!preferCache)refreshWork?.cancel()
         busy = true
-        if (!libraryReady) startup.showLoading("Quelle wird geladen …")
+        if (!libraryReady) startup.showLoading(getString(R.string.loading_source))
         playerPane.cancelSeek()
-        status.text = "Playlist wird importiert …"
+        status.setText(R.string.importing_playlist)
         try {
             val cached=if(preferCache)try{loader.restore(source,core)}catch(error:Exception){
                 if(error is kotlinx.coroutines.CancellationException)throw error
@@ -870,9 +886,10 @@ class MainActivity : ComponentActivity() {
             }
             getPreferences(MODE_PRIVATE).edit().putString("activeSourceId",activeSourceId).apply()
             val warning=result.optJSONArray("warnings")?.length()?:0
-            status.text = "${result.getInt("count")} Einträge${if(cached!=null)" · gespeichert" else ""}${if(warning>0)" · Hinweise im Diagnosebericht" else ""} · ${source.optString("name", "Playlist")}"
+            val count=result.getInt("count")
+            status.text = "${resources.getQuantityString(R.plurals.entries_count,count,count)}${if(cached!=null)" · "+getString(R.string.status_cached) else ""}${if(warning>0)" · "+getString(R.string.status_warnings) else ""} · ${source.optString("name", "Playlist")}"
             if(cached!=null&&loader.shouldRefresh(source)){
-                status.text="Gespeicherte Liste · Aktualisierung im Hintergrund …"
+                status.setText(R.string.refreshing_in_background)
                 refreshWork=launchSafe {
                 // Build a new generation without disturbing playback or its current revision.
                 try {
@@ -881,7 +898,7 @@ class MainActivity : ComponentActivity() {
                 } catch(error:Exception) {
                     if(error is kotlinx.coroutines.CancellationException)throw error
                     lastFailure=ImportErrors.describe(error,"refresh_cache").json()
-                    if(selectedId==null)status.text="Gespeicherte Liste verfügbar · Aktualisierung fehlgeschlagen. Quelle erneut laden."
+                    if(selectedId==null)status.setText(R.string.refresh_failed)
                 }
                 }
             }
@@ -890,15 +907,18 @@ class MainActivity : ComponentActivity() {
     private suspend fun refreshCategories() {
         val data = core.call("categories")
         val array = data.getJSONArray("categories")
+        val uncategorized = getString(R.string.category_uncategorized)
         categoryItems = List(array.length()) { i ->
             val c = array.getJSONObject(i)
-            CategoryItem(c.getLong("id"), c.getString("name"), c.getString("kind"), c.getInt("count"))
+            // The core names entries without a provider group "Ohne Kategorie"; show that in the UI language.
+            val name = c.getString("name").let { if (it == UNCATEGORIZED) uncategorized else it }
+            CategoryItem(c.getLong("id"), name, c.getString("kind"), c.getInt("count"))
         }
         val kinds = data.getJSONArray("kinds")
         for (i in 0 until kinds.length()) {
             val section = kinds.getJSONObject(i)
             val key = section.getString("id")
-            val title = when (key) { "live" -> "Live"; "movies" -> "Movies"; "series" -> "Series"; else -> "Unzugeordnet" }
+            val title = getString(when (key) { "live" -> R.string.tab_live; "movies" -> R.string.tab_movies; "series" -> R.string.tab_series; else -> R.string.tab_unclassified })
             kindButtons[key]?.visibility=if(key=="unclassified"&&section.getInt("count")==0)View.GONE else View.VISIBLE
             kindButtons[key]?.text = "$title (${section.getInt("count")})"
         }
@@ -911,7 +931,7 @@ class MainActivity : ComponentActivity() {
         searchWork?.cancel()
         channelSearch.setText(""); categorySearch.setText("")
         searchWork?.cancel()
-        channelSearch.hint = when (kind) { "movies" -> "Filme suchen"; "series" -> "Serien / Episoden suchen"; else -> "Sender suchen" }
+        channelSearch.hint = getString(when (kind) { "movies" -> R.string.search_movies; "series" -> R.string.search_series; else -> R.string.search_channels })
         channelSearch.contentDescription = channelSearch.hint
         kindButtons.forEach { (key, tab) -> tab.isActivated = key == kind; tab.isSelected = key == kind }
         channelRows.replace(emptyList()); total = 0
@@ -930,16 +950,16 @@ class MainActivity : ComponentActivity() {
         if (section != null && text.isEmpty()) {
             val recent = source?.let { userLibrary.recentCount(it, section) } ?: 0
             val favorites = source?.let { userLibrary.favoriteCount(it, section) } ?: 0
-            rows += Row(RECENT_ROW, "Zuletzt gesehen ($recent)")
-            rows += Row(FAVORITES_ROW, "★ Favoriten ($favorites)")
+            rows += Row(RECENT_ROW, getString(R.string.recent_row, recent))
+            rows += Row(FAVORITES_ROW, getString(R.string.favorites_row, favorites))
         }
         shownCounts = if (source == null || section == null) "" else "${userLibrary.recentCount(source,section)}/${userLibrary.favoriteCount(source,section)}/${userLibrary.historyLimit}"
-        rows += Row(-1, "Alle Kategorien")
+        rows += Row(-1, getString(R.string.category_all))
         rows += matches.map { Row(it.id, "${it.name} (${it.count})") }
         categoryRows.replace(rows)
         categoryEmpty.visibility = if (matches.isEmpty()) View.VISIBLE else View.GONE
-        categoryEmpty.text = if (text.isNotEmpty()) "Keine Kategorien für „${categorySearch.text}“. Suche löschen, um alle Kategorien zu sehen." else "In diesem Bereich gibt es keine Kategorien."
-        channelHeading.text = when (special) { "recent" -> "Zuletzt gesehen"; "favorites" -> "Favoriten"; else -> categoryItems.firstOrNull { it.id == category }?.name ?: "Alle Kategorien" }
+        categoryEmpty.text = if (text.isNotEmpty()) getString(R.string.categories_no_match, categorySearch.text) else getString(R.string.categories_empty_section)
+        channelHeading.text = when (special) { "recent" -> getString(R.string.recent); "favorites" -> getString(R.string.favorites); else -> categoryItems.firstOrNull { it.id == category }?.name ?: getString(R.string.category_all) }
     }
     private fun search() {
         offset=0; loadingPage=false; focusNextPage=false; selectNextPage=false
@@ -960,11 +980,11 @@ class MainActivity : ComponentActivity() {
             channelRows.replace(List(array.length()) { i -> val c = array.getJSONObject(i); Row.from(c) })
             channelEmpty.visibility = if (total == 0) View.VISIBLE else View.GONE
             channelEmpty.text = when {
-                requestQuery.isNotBlank() -> "Keine Treffer für „$requestQuery“."
-                requestSpecial != null && !data.optBoolean("keyed", true) -> "Die Bibliothek wird aktualisiert. Verlauf und Favoriten erscheinen nach dem nächsten Laden der Quelle."
-                requestSpecial == "recent" -> "Noch nichts angesehen. Gestartete ${when(requestKind){"live"->"Sender";"movies"->"Filme";else->"Serien"}} erscheinen hier."
-                requestSpecial == "favorites" -> "Noch keine Favoriten. ★ in der Detailansicht oder im Player wählen, oder lange OK auf einem Eintrag drücken."
-                else -> "Keine Einträge in dieser Auswahl."
+                requestQuery.isNotBlank() -> getString(R.string.no_results_for, requestQuery)
+                requestSpecial != null && !data.optBoolean("keyed", true) -> getString(R.string.library_updating)
+                requestSpecial == "recent" -> getString(when(requestKind){"live"->R.string.recent_empty_live;"movies"->R.string.recent_empty_movies;else->R.string.recent_empty_series})
+                requestSpecial == "favorites" -> getString(R.string.favorites_empty)
+                else -> getString(R.string.selection_empty)
             }
             clearFiltersButton.visibility = if(total==0 && (requestQuery.isNotBlank() || requestCategory!=null || categorySearch.text.isNotBlank())) View.VISIBLE else View.GONE
             if (focusIndex != null) {
@@ -982,7 +1002,7 @@ class MainActivity : ComponentActivity() {
                     focusFirstChannel()
                 }
             }
-            resultCount.text = if(kind=="series"&&openedSeries==null)if(total==1)"1 Serie" else "$total Serien" else if(openedSeries!=null)if(total==1)"1 Episode" else "$total Episoden" else if(total==1) "1 Eintrag" else "$total Einträge"
+            resultCount.text = resources.getQuantityString(if(kind=="series"&&openedSeries==null)R.plurals.series_count else if(openedSeries!=null)R.plurals.episodes_count else R.plurals.entries_count,total,total)
         }
     }
     private fun loadNextPage(focusNew: Boolean = false, selectNew: Boolean = false) {
@@ -1053,7 +1073,7 @@ class MainActivity : ComponentActivity() {
         val rows = result.getJSONArray("programmes")
         if(playContext?.kind!="live"){epg.text="";return}
         val formatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
-        epg.text = if (rows.length() == 0) "Kein EPG für diesen Kanal" else (0 until rows.length()).joinToString("\n") {
+        epg.text = if (rows.length() == 0) getString(R.string.no_epg) else (0 until rows.length()).joinToString("\n") {
             val p = rows.getJSONObject(it)
             "${formatter.format(Instant.ofEpochSecond(p.getLong("start")))}  ${p.getString("title")}"
         }
@@ -1069,18 +1089,18 @@ class MainActivity : ComponentActivity() {
     }
     private fun chooseSources() {
         if (sources.isEmpty()) { settingsDialog(); return }
-        AlertDialog.Builder(this).setTitle("Gespeicherte Playlists")
+        AlertDialog.Builder(this).setTitle(R.string.saved_playlists)
             .setItems(sources.map { it.optString("name", "Playlist") }.toTypedArray()) { _, i -> launchSafe { importSource(sources[i], false) } }
-            .setNeutralButton("Entfernen") { _, _ -> removeSource() }.setNegativeButton("Schließen", null).show()
+            .setNeutralButton(R.string.remove) { _, _ -> removeSource() }.setNegativeButton(R.string.close, null).show()
     }
     private fun removeSource() {
-        AlertDialog.Builder(this).setTitle("Quelle entfernen")
+        AlertDialog.Builder(this).setTitle(R.string.source_remove)
             .setItems(sources.map { it.optString("name", "Playlist") }.toTypedArray()) { _, i ->
                 val removed=sources[i]
-                val confirm=AlertDialog.Builder(this).setTitle("Quelle „${removed.optString("name","Playlist")}“ entfernen?")
-                    .setMessage("Die gespeicherte Quelle, ihre Anmeldung, ihr lokaler Katalog sowie „Zuletzt gesehen“, Favoriten und Wiedergabefortschritt dieser Quelle werden entfernt. Du kannst die Quelle anschließend erneut hinzufügen.")
-                    .setNegativeButton("Abbrechen",null)
-                    .setPositiveButton("Quelle entfernen") { _,_-> launchSafe {
+                val confirm=AlertDialog.Builder(this).setTitle(getString(R.string.source_remove_confirm,removed.optString("name","Playlist")))
+                    .setMessage(R.string.source_remove_message)
+                    .setNegativeButton(R.string.cancel,null)
+                    .setPositiveButton(R.string.source_remove) { _,_-> launchSafe {
                         refreshWork?.cancel()
                         val updated=sources.toMutableList().apply { remove(removed) }
                         withContext(Dispatchers.IO) { store.save(updated) }; sources=updated
@@ -1098,30 +1118,30 @@ class MainActivity : ComponentActivity() {
                     } }.create()
                 confirm.show()
                 confirm.getButton(AlertDialog.BUTTON_NEGATIVE).apply { isFocusableInTouchMode=true;requestFocus() }
-            }.setNegativeButton("Abbrechen", null).show()
+            }.setNegativeButton(R.string.cancel, null).show()
     }
     private fun urlDialog(isEpg: Boolean) {
-        form(if (isEpg) "XMLTV-Adresse" else "Playlist-Adresse", listOf("Name", "HTTP(S)-URL")) { values ->
+        form(getString(if (isEpg) R.string.xmltv_address else R.string.playlist_address), listOf(getString(R.string.field_name), getString(R.string.field_url))) { values ->
             val source = JSONObject().put("kind", "url").put("name", values[0].ifBlank { if (isEpg) "EPG" else "Playlist" }).put("url", values[1])
             if (isEpg) importGuide(source) else importSource(source, true)
         }
     }
     private fun xtreamDialog() {
-        form("Xtream Codes · Live, Filme und Serien", listOf("Name", "Server: https://anbieter.example", "Benutzername", "Passwort"), 3) { v ->
+        form(getString(R.string.xtream_title), listOf(getString(R.string.field_name), getString(R.string.field_server), getString(R.string.field_username), getString(R.string.field_password)), 3) { v ->
             val source = JSONObject().put("kind", "xtream").put("name", v[0].ifBlank { "Xtream" }).put("server", v[1]).put("username", v[2]).put("password", v[3]).put("vod", true)
             importSource(source, true)
         }
     }
     private fun epgDialog() {
-        AlertDialog.Builder(this).setTitle("XMLTV-Programmführer")
-            .setItems(arrayOf("Datei öffnen", "HTTP(S)-Adresse")) { _, i -> if (i == 0) pickDocument(true) else urlDialog(true) }.setNegativeButton("Abbrechen", null).show()
+        AlertDialog.Builder(this).setTitle(R.string.epg_title)
+            .setItems(arrayOf(getString(R.string.epg_open_file), getString(R.string.epg_http_address))) { _, i -> if (i == 0) pickDocument(true) else urlDialog(true) }.setNegativeButton(R.string.cancel, null).show()
     }
     private fun form(title: String, hints: List<String>, passwordIndex: Int = -1, submit: suspend (List<String>) -> Unit) {
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(8),dp(24),dp(8)) }
         val fields = hints.mapIndexed { i, hint -> EditText(this).apply {
             id=View.generateViewId();isSingleLine = true; textSize = 18f
-            val fieldLabel=when { i==1->if(passwordIndex>=0)"Serveradresse" else "HTTP(S)-URL"; else->hint }
-            this.hint=when(i){0->"z. B. Fernsehen";1->"https://anbieter.example";else->hint}
+            val fieldLabel=hint
+            this.hint=when(i){0->getString(R.string.field_name_hint);1->getString(R.string.field_server_hint);else->hint}
             contentDescription=fieldLabel
             inputType = if (i == passwordIndex) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else if(i==1) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI else InputType.TYPE_CLASS_TEXT
             layout.addView(label(fieldLabel,13f).apply { setTextColor(TvUi.muted) },LinearLayout.LayoutParams(-1,-2))
@@ -1136,7 +1156,7 @@ class MainActivity : ComponentActivity() {
             if(!libraryReady){chrome.visibility=View.INVISIBLE;startup.showEmpty()}
         }
         val dialog=AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(layout) })
-            .setPositiveButton("Übernehmen",null).setNegativeButton("Abbrechen"){_,_->cancelForm()}.create()
+            .setPositiveButton(R.string.apply,null).setNegativeButton(R.string.cancel){_,_->cancelForm()}.create()
         dialog.setOnCancelListener { cancelForm() }
         dialog.show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -1149,23 +1169,23 @@ class MainActivity : ComponentActivity() {
                 passwordIndex>=0 && values[passwordIndex].isBlank()->passwordIndex
                 else->-1
             }
-            if(invalid>=0){fields[invalid].error=if(invalid==1)"Eine gültige HTTP(S)-Adresse eingeben." else "Dieses Feld ausfüllen.";fields[invalid].requestFocus();return@setOnClickListener}
+            if(invalid>=0){fields[invalid].error=getString(if(invalid==1)R.string.field_invalid_url else R.string.field_required);fields[invalid].requestFocus();return@setOnClickListener}
             work=scope.launch {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
-                errorText.text="Quelle wird geprüft und geladen …";errorText.visibility=View.VISIBLE
+                errorText.setText(R.string.source_checking);errorText.visibility=View.VISIBLE
                 try { submit(values);dialog.dismiss() }
                 catch(error:Exception){
                     if(error is kotlinx.coroutines.CancellationException)throw error
                     val detail=ImportErrors.describe(error);lastFailure=detail.json()
-                    errorText.text=detail.message;status.text=detail.message
-                    if(!libraryReady)startup.showError(detail.message)
+                    val message=detail.message(this@MainActivity);errorText.text=message;status.text=message
+                    if(!libraryReady)startup.showError(message)
                 } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true }
             }
         }
     }
     private fun pickDocument(isEpg: Boolean) {
         try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }, if (isEpg) 101 else 100) }
-        catch (_: Exception) { status.text = "Keine Dateiauswahl installiert. Bitte URL-Import verwenden." }
+        catch (_: Exception) { status.setText(R.string.no_file_picker) }
     }
     @Deprecated("Platform Activity document picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -1174,7 +1194,7 @@ class MainActivity : ComponentActivity() {
         val uri = data?.data ?: return
         launchSafe {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            val source = JSONObject().put("kind", "file").put("name", uri.lastPathSegment?.substringAfterLast('/') ?: "Datei").put("uri", uri.toString())
+            val source = JSONObject().put("kind", "file").put("name", uri.lastPathSegment?.substringAfterLast('/') ?: getString(R.string.file_default_name)).put("uri", uri.toString())
             if (requestCode == 101) importGuide(source) else importSource(source, true)
         }
     }
@@ -1182,7 +1202,7 @@ class MainActivity : ComponentActivity() {
         loader.load(source, core, true)
         withContext(Dispatchers.IO) { epgStore.save(listOf(source)) }
         refreshGuide()
-        status.text = "EPG importiert"
+        status.setText(R.string.epg_imported)
     }
     private fun setFullScreen(value: Boolean) {
         if(value && selectedId==null) return
@@ -1236,8 +1256,8 @@ class MainActivity : ComponentActivity() {
     private fun showProgrammeDetails() {
         val text=listOf(status.text.toString(),epg.text.toString()).filter { it.isNotBlank() }.joinToString("\n\n")
         val content=label(text,16f).apply { setPadding(dp(20),dp(12),dp(20),dp(12));setLineSpacing(0f,1.4f);isFocusable=true }
-        AlertDialog.Builder(this).setTitle("Programm und Wiedergabe").setView(ScrollView(this).apply { addView(content) })
-            .setPositiveButton("Schließen",null).show()
+        AlertDialog.Builder(this).setTitle(R.string.programme_title).setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton(R.string.close,null).show()
     }
     private fun handleBack() {
         playerPane.cancelSeek()
@@ -1277,13 +1297,13 @@ class MainActivity : ComponentActivity() {
             val manager=getSystemService(android.app.ActivityManager::class.java)
             val exit=manager.getHistoricalProcessExitReasons(packageName,0,1).firstOrNull()
             if(exit!=null)report.put("previous_exit",JSONObject().put("reason",exit.reason).put("time",exit.timestamp)
-                .put("meaning",when(exit.reason){android.app.ApplicationExitInfo.REASON_LOW_MEMORY->"Android hat die App wegen Arbeitsspeicherdruck beendet";android.app.ApplicationExitInfo.REASON_CRASH_NATIVE->"Nativer Absturz";android.app.ApplicationExitInfo.REASON_ANR->"Die App reagierte nicht";android.app.ApplicationExitInfo.REASON_CRASH->"App-Absturz";else->"Anderer oder unbekannter Beendigungsgrund"}))
-        }else report.put("previous_exit","Auf dieser Android-Version nicht verfügbar")
+                .put("meaning",when(exit.reason){android.app.ApplicationExitInfo.REASON_LOW_MEMORY->getString(R.string.exit_low_memory);android.app.ApplicationExitInfo.REASON_CRASH_NATIVE->getString(R.string.exit_native_crash);android.app.ApplicationExitInfo.REASON_ANR->getString(R.string.exit_anr);android.app.ApplicationExitInfo.REASON_CRASH->getString(R.string.exit_crash);else->getString(R.string.exit_other)}))
+        }else report.put("previous_exit",getString(R.string.exit_unavailable))
         val text=report.toString(2)
         val content=TextView(this@MainActivity).apply{textSize=13f;setTextIsSelectable(true);setPadding(dp(20),dp(10),dp(20),dp(10));this.text=text}
-        AlertDialog.Builder(this@MainActivity).setTitle("Diagnosebericht").setView(android.widget.ScrollView(this@MainActivity).apply{addView(content)})
-            .setPositiveButton("Kopieren"){_,_->(getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("IPTV Diagnose",text))}
-            .setNegativeButton("Schließen",null).show()
+        AlertDialog.Builder(this@MainActivity).setTitle(R.string.diagnostics_title).setView(android.widget.ScrollView(this@MainActivity).apply{addView(content)})
+            .setPositiveButton(R.string.copy){_,_->(getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText(getString(R.string.diagnostics_clip),text))}
+            .setNegativeButton(R.string.close,null).show()
     }}
     private fun searchField(hint: String, changed: () -> Unit) = EditText(this).apply {
         id=View.generateViewId(); this.hint = hint; contentDescription = hint; isSingleLine = true; textSize = 12f
@@ -1317,17 +1337,17 @@ class MainActivity : ComponentActivity() {
     /** Short status for cards and rows: progress, last episode or the "watched" mark. */
     private fun progressLabel(row:Row):Pair<String?,Float?>{
         val source=activeSourceId ?: return null to null
-        if(!row.available)return "Derzeit nicht verfügbar" to null
+        if(!row.available)return getString(R.string.unavailable_now) to null
         val key=row.key ?: return null to null
         if(row.series&&openedSeries==null){
             val last=userLibrary.lastEpisode(source,key) ?: return null to null
             val progress=last.episodeKey?.let{userLibrary.progress(source,it)}
             val position=progress?.resumeSec?.let{" · "+TvUi.clock(it)} ?: if(progress?.done==true)" · ✓" else ""
-            return (last.episodeLabel ?: "Zuletzt gesehen")+position to progress?.takeIf{!it.done}?.fraction
+            return (last.episodeLabel ?: getString(R.string.recent))+position to progress?.takeIf{!it.done}?.fraction
         }
         if(kind=="live")return null to null
         val progress=userLibrary.progress(source,key) ?: return null to null
-        if(progress.done)return "✓ Gesehen" to null
+        if(progress.done)return getString(R.string.watched) to null
         val resume=progress.resumeSec ?: return null to null
         return (progress.durationSec?.let{"${TvUi.clock(resume)} / ${TvUi.clock(it)}"} ?: TvUi.clock(resume)) to progress.fraction
     }
@@ -1340,19 +1360,21 @@ class MainActivity : ComponentActivity() {
         val favoriteName=if(openedSeries!=null)openedSeriesName else row.title
         if(source!=null&&section!=null&&favoriteKey!=null){
             val active=userLibrary.isFavorite(source,section,favoriteKey)
-            val label=if(openedSeries!=null)(if(active)"★ Serie aus Favoriten entfernen" else "☆ Serie zu Favoriten hinzufügen")
-                else if(active)"★ Aus Favoriten entfernen" else "☆ Zu Favoriten hinzufügen"
+            val label=if(openedSeries!=null)(if(active)"★ "+getString(R.string.series_favorite_remove) else "☆ "+getString(R.string.series_favorite_add))
+                else if(active)"★ "+getString(R.string.favorite_remove) else "☆ "+getString(R.string.favorite_add)
             actions+=label to {toggleFavorite(section,favoriteKey,favoriteName)}
         }
         if(special=="recent"&&openedSeries==null&&source!=null&&section!=null&&row.key!=null)
-            actions+="Aus „Zuletzt gesehen“ entfernen" to {removeRecent(section,row)}
-        actions+="Vollständigen Titel anzeigen" to {showRowTitle(row)}
+            actions+=getString(R.string.recent_remove) to {removeRecent(section,row)}
+        actions+=getString(R.string.show_full_title) to {showRowTitle(row)}
         AlertDialog.Builder(this).setTitle(row.title).setItems(actions.map{it.first}.toTypedArray()){_,index->actions[index].second()}
-            .setNegativeButton("Schließen",null).show()
+            .setNegativeButton(R.string.close,null).show()
     }
     private data class CategoryItem(val id: Long, val name: String, val kind: String, val count: Int)
     private inner class Rows(private val channelList:Boolean=false,val select:(Row)->Unit):RecyclerView.Adapter<Rows.Holder>() {
         init{setHasStableIds(true)}
+        // Lazy: adapters are created before the activity has its resources.
+        private val seasonsEpisodes by lazy { getString(R.string.seasons_episodes) }
         val rows=ArrayList<Row>()
         inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean,
                            val trailing:TextView?=null,val star:StarBadge?=null):RecyclerView.ViewHolder(root){
@@ -1375,8 +1397,8 @@ class MainActivity : ComponentActivity() {
                     if(android.os.Build.VERSION.SDK_INT>=30){
                         val row=(channels.findContainingViewHolder(host) as? Holder)?.row
                         val states=listOfNotNull(
-                            if(host.isActivated)(if(channelList)"Wird wiedergegeben" else "Ausgewählte Kategorie") else null,
-                            if(channelList&&row!=null&&favoriteOf(row))"Favorit" else null,
+                            if(host.isActivated)getString(if(channelList)R.string.state_playing else R.string.state_selected_category) else null,
+                            if(channelList&&row!=null&&favoriteOf(row))getString(R.string.state_favorite) else null,
                             if(channelList&&row!=null)progressLabel(row).first else null)
                         if(states.isNotEmpty())info.stateDescription=states.joinToString(", ")
                     }
@@ -1405,7 +1427,7 @@ class MainActivity : ComponentActivity() {
             (holder.image as? PosterImageView)?.apply{this.favorite=favorite;this.progress=fraction}
             holder.star?.apply{active=favorite;visibility=if(favorite)View.VISIBLE else View.GONE}
             holder.trailing?.apply{text=label?:"";visibility=if(label==null)View.GONE else View.VISIBLE}
-            holder.metadata?.text=label ?: if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
+            holder.metadata?.text=label ?: if(row.series)seasonsEpisodes else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
             holder.metadata?.setTextColor(if(label!=null&&row.available)TvUi.accent else TvUi.muted)
             holder.root.alpha=if(row.available)1f else 0.55f
         }
@@ -1421,7 +1443,7 @@ class MainActivity : ComponentActivity() {
             val active=if(channelList)!row.series&&row.id==selectedId&&::playback.isInitialized&&playback.player!=null else row.id==activeCategory
             holder.root.isActivated=active
             holder.text.text="${if(active)if(channelList)"▶ " else "✓ " else ""}${if(row.episode.isNotEmpty())row.episode+" · " else ""}${row.title}"
-            holder.metadata?.text=if(row.series)"Staffeln · Episoden" else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
+            holder.metadata?.text=if(row.series)seasonsEpisodes else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
             holder.root.contentDescription=row.title
             bindStatus(holder,row)
             val poster=holder.image as? PosterImageView
@@ -1482,7 +1504,7 @@ class MainActivity : ComponentActivity() {
         fun dropFirst(count:Int){rows.subList(0,count).clear();notifyItemRangeRemoved(0,count)}
         fun dropLast(count:Int){val start=rows.size-count;rows.subList(start,rows.size).clear();notifyItemRangeRemoved(start,count)}
     }
-    private fun showRowTitle(row:Row){AlertDialog.Builder(this).setTitle(if(row.series)"Serie" else "Titel").setMessage(listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")).setPositiveButton("Schließen",null).show()}
+    private fun showRowTitle(row:Row){AlertDialog.Builder(this).setTitle(if(row.series)R.string.row_series else R.string.row_title).setMessage(listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")).setPositiveButton(R.string.close,null).show()}
 
 }
 

@@ -1,8 +1,284 @@
 <resources>
-    <string name="app_name">RUSTREAM IPTV</string>
+    <string name="app_name" translatable="false">RUSTREAM IPTV</string>
     <string name="app_description">RUSTREAM IPTV ist ein IPTV-Player mit einem in Rust entwickelten Core. Der Fokus liegt auf hoher Performance und einem flüssigen Streaming-Erlebnis – besonders bei Live-Sport und Fußball.</string>
     <string name="app_info">App-Info</string>
     <string name="app_version">Version %1$s</string>
-    <string name="app_developer">developed by Ninos Oshana</string>
+    <string name="app_developer" translatable="false">developed by Ninos Oshana</string>
     <color name="launcher_background">#FBF5E9</color>
+
+    <!-- General -->
+    <string name="close">Schließen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="apply">Übernehmen</string>
+    <string name="details">Details</string>
+    <string name="remove">Entfernen</string>
+    <string name="copy">Kopieren</string>
+    <string name="core_missing">Rust-Core konnte nicht geladen werden. Passendes APK installieren.</string>
+
+    <!-- Sections and lists -->
+    <string name="tab_live">Live</string>
+    <string name="tab_movies">Movies</string>
+    <string name="tab_series">Series</string>
+    <string name="tab_unclassified">Unzugeordnet</string>
+    <string name="settings">Einstellungen</string>
+    <string name="categories">Kategorien</string>
+    <string name="categories_list">Kategorienliste</string>
+    <string name="entries_list">Eintragsliste</string>
+    <string name="episodes_list">Episodenliste</string>
+    <string name="series_library">Serienbibliothek</string>
+    <string name="movie_library">Filmbibliothek</string>
+    <string name="search_categories">Kategorie suchen</string>
+    <string name="search_channels">Sender suchen</string>
+    <string name="search_movies">Filme suchen</string>
+    <string name="search_series">Serien / Episoden suchen</string>
+    <string name="categories_none">Keine Kategorien gefunden</string>
+    <string name="categories_no_match">Keine Kategorien für „%1$s“. Suche löschen, um alle Kategorien zu sehen.</string>
+    <string name="categories_empty_section">In diesem Bereich gibt es keine Kategorien.</string>
+    <string name="category_all">Alle Kategorien</string>
+    <string name="category_uncategorized">Ohne Kategorie</string>
+    <string name="entries_none">Keine Einträge gefunden</string>
+    <string name="reset_search">Suche zurücksetzen</string>
+    <string name="recent">Zuletzt gesehen</string>
+    <string name="recent_row">Zuletzt gesehen (%1$d)</string>
+    <string name="favorites">Favoriten</string>
+    <string name="favorites_row">★ Favoriten (%1$d)</string>
+    <string name="no_results_for">Keine Treffer für „%1$s“.</string>
+    <string name="library_updating">Die Bibliothek wird aktualisiert. Verlauf und Favoriten erscheinen nach dem nächsten Laden der Quelle.</string>
+    <string name="recent_empty_live">Noch nichts angesehen. Gestartete Sender erscheinen hier.</string>
+    <string name="recent_empty_movies">Noch nichts angesehen. Gestartete Filme erscheinen hier.</string>
+    <string name="recent_empty_series">Noch nichts angesehen. Gestartete Serien erscheinen hier.</string>
+    <string name="favorites_empty">Noch keine Favoriten. ★ in der Detailansicht oder im Player wählen, oder lange OK auf einem Eintrag drücken.</string>
+    <string name="selection_empty">Keine Einträge in dieser Auswahl.</string>
+    <string name="item_unavailable">„%1$s“ ist in der aktuellen Liste nicht verfügbar · Lange OK zum Entfernen</string>
+    <string name="unavailable_now">Derzeit nicht verfügbar</string>
+    <string name="watched">✓ Gesehen</string>
+    <string name="seasons_episodes">Staffeln · Episoden</string>
+    <string name="state_playing">Wird wiedergegeben</string>
+    <string name="state_selected_category">Ausgewählte Kategorie</string>
+    <string name="state_favorite">Favorit</string>
+    <string name="row_series">Serie</string>
+    <string name="row_title">Titel</string>
+    <string name="favorite_add">Zu Favoriten hinzufügen</string>
+    <string name="favorite_remove">Aus Favoriten entfernen</string>
+    <string name="series_favorite_add">Serie zu Favoriten hinzufügen</string>
+    <string name="series_favorite_remove">Serie aus Favoriten entfernen</string>
+    <string name="recent_remove">Aus „Zuletzt gesehen“ entfernen</string>
+    <string name="show_full_title">Vollständigen Titel anzeigen</string>
+    <plurals name="entries_count">
+        <item quantity="one">%d Eintrag</item>
+        <item quantity="other">%d Einträge</item>
+    </plurals>
+    <plurals name="series_count">
+        <item quantity="one">%d Serie</item>
+        <item quantity="other">%d Serien</item>
+    </plurals>
+    <plurals name="movies_count">
+        <item quantity="one">%d Film</item>
+        <item quantity="other">%d Filme</item>
+    </plurals>
+    <plurals name="episodes_count">
+        <item quantity="one">%d Episode</item>
+        <item quantity="other">%d Episoden</item>
+    </plurals>
+    <plurals name="seasons_count">
+        <item quantity="one">%d Staffel</item>
+        <item quantity="other">%d Staffeln</item>
+    </plurals>
+    <plurals name="episodes_available">
+        <item quantity="one">%d Episode verfügbar</item>
+        <item quantity="other">%d Episoden verfügbar</item>
+    </plurals>
+
+    <!-- Movie and series details -->
+    <string name="back_series_library">← Serienbibliothek</string>
+    <string name="back_movie_library">← Filmbibliothek</string>
+    <string name="resume">Fortsetzen</string>
+    <string name="resume_at">Fortsetzen bei %1$s</string>
+    <string name="play">Abspielen</string>
+    <string name="play_again">Erneut abspielen</string>
+    <string name="play_from_start">Von Anfang an</string>
+    <string name="open_playback">Wiedergabe öffnen</string>
+    <string name="watched_done">✓ Bereits gesehen</string>
+    <string name="watched_of">Gesehen: %1$s von %2$s</string>
+    <string name="watched_until">Gesehen bis %1$s</string>
+    <string name="last_episode">Letzte Episode</string>
+    <string name="series_rewatch">↻ %1$s erneut ansehen</string>
+    <string name="series_resume">▶ Fortsetzen · %1$s</string>
+    <string name="series_resume_at">▶ Fortsetzen · %1$s · %2$s</string>
+    <string name="last_episode_unavailable">Die zuletzt gesehene Episode ist in der aktuellen Liste nicht verfügbar.</string>
+    <string name="loading_episodes">Episoden werden geladen …</string>
+    <string name="choose_season">Staffel wählen</string>
+    <string name="choose_season_menu">Staffel wählen ▾</string>
+    <string name="season">Staffel %1$d</string>
+    <string name="season_menu">Staffel %1$d ▾</string>
+    <string name="season_unknown">Ohne Staffelnummer</string>
+    <string name="season_unknown_menu">Ohne Staffelnummer ▾</string>
+    <string name="seasons_more">Weitere Staffeln</string>
+    <string name="seasons_previous">Vorherige Staffeln</string>
+
+    <!-- Player and connection details -->
+    <string name="choose_channel">Sender wählen</string>
+    <string name="epg_hint">Sender wählen, um das Programm anzuzeigen</string>
+    <string name="no_epg">Kein EPG für diesen Kanal</string>
+    <string name="programme_title">Programm und Wiedergabe</string>
+    <string name="player_video">Video und Wiedergabesteuerung</string>
+    <string name="player_area">Videobereich</string>
+    <string name="player_controls">Wiedergabesteuerung</string>
+    <string name="player_empty">Wähle links einen Sender, Film oder eine Serienepisode aus.</string>
+    <string name="player_focus_hint">OK: Vollbild  ·  ↓ Steuerung</string>
+    <string name="player_back_30">30 Sekunden zurück</string>
+    <string name="player_forward_30">30 Sekunden vor</string>
+    <string name="player_play">Wiedergabe starten</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_stop">Stopp</string>
+    <string name="player_fullscreen">Vollbild</string>
+    <string name="player_fullscreen_exit">Vollbild verlassen</string>
+    <string name="player_error_hint">Zurück zur Übersicht · Refresh oder andere Quelle wählen</string>
+    <string name="player_fast_forward">Vorspulen</string>
+    <string name="player_rewind">Zurückspulen</string>
+    <string name="player_live_no_seek">LIVE · Spulen nicht verfügbar</string>
+    <string name="refresh">Refresh</string>
+    <string name="refresh_description">Refresh · Wiedergabe neu verbinden</string>
+    <string name="stat_buffer">PUFFER</string>
+    <string name="stat_ingress">ZUFLUSS</string>
+    <string name="stat_memory">DATENPUFFER</string>
+    <string name="health_ready">Bereit</string>
+    <string name="health_playing">Wiedergabe</string>
+    <string name="health_low_buffer">Wenig Puffer</string>
+    <string name="health_stable">Stabil</string>
+    <string name="health_paused">Pausiert</string>
+    <string name="health_connecting">Verbinde</string>
+    <string name="health_buffering">Puffert</string>
+    <string name="health_reconnecting">Neu verbinden</string>
+    <string name="health_finished">Beendet</string>
+    <string name="health_error">Quellfehler</string>
+    <string name="playback_playing">Wiedergabe</string>
+    <string name="playback_buffering">Puffer wird gefüllt</string>
+    <string name="playback_connecting">Verbinde …</string>
+    <string name="playback_connecting_title">Verbinde · %1$s</string>
+    <string name="playback_waiting">Verbindung unterbrochen · Versuch %1$d</string>
+    <string name="playback_paused">Pausiert</string>
+    <string name="playback_finished">Wiedergabe beendet</string>
+    <string name="playback_idle">Kanal auswählen</string>
+    <string name="playback_stopped">Gestoppt</string>
+    <string name="playback_control_failed">Wiedergabesteuerung fehlgeschlagen</string>
+    <string name="playback_retrying">%1$s · Neuer Versuch wird vorbereitet.</string>
+
+    <!-- Startup -->
+    <string name="startup_preparing">Dein Programm wird vorbereitet</string>
+    <string name="startup_empty_title">Dein Fernsehen beginnt hier</string>
+    <string name="startup_empty_message">Füge eine Playlist oder eine Xtream-Quelle hinzu, um Sender, Filme und Serien zu laden.</string>
+    <string name="startup_error_title">Quelle konnte nicht geladen werden</string>
+    <string name="retry">Erneut versuchen</string>
+    <string name="source_add">Quelle hinzufügen</string>
+    <string name="source_choose">Quelle wählen</string>
+
+    <!-- Settings -->
+    <string name="settings_section">Quellen &amp; Wiedergabe</string>
+    <string name="settings_sources">Quellen verwalten</string>
+    <string name="settings_add_file">Datei hinzufügen</string>
+    <string name="settings_add_url">URL hinzufügen</string>
+    <string name="settings_xtream">Xtream anmelden</string>
+    <string name="settings_epg">EPG importieren</string>
+    <string name="settings_picture">Bilddarstellung</string>
+    <string name="settings_buffer">Live-Pufferprofil</string>
+    <string name="settings_history">Zuletzt gesehen · Anzahl</string>
+    <string name="settings_language">Sprache · Language</string>
+    <string name="settings_diagnostics">Diagnosebericht</string>
+    <string name="settings_back_hint">Zurück zum Schließen</string>
+    <string name="picture_title">Bilddarstellung im Vollbild</string>
+    <string name="picture_fill">Bild füllen · proportional zuschneiden</string>
+    <string name="picture_fit">Originalformat · vollständiges Bild</string>
+    <string name="buffer_title">Live-Puffer · ab nächstem Verbindungsaufbau</string>
+    <string name="buffer_sport">Sport · 1 s / 16 MiB</string>
+    <string name="buffer_balanced">Ausgewogen · 3 s / 32 MiB</string>
+    <string name="buffer_stable">Stabil · 6 s / 64 MiB</string>
+    <string name="history_title">„Zuletzt gesehen“ · Einträge je Bereich</string>
+    <string name="language_title">Sprache · Language</string>
+
+    <!-- Sources -->
+    <string name="loading_saved_source">Gespeicherte Quelle wird geladen …</string>
+    <string name="loading_source">Quelle wird geladen …</string>
+    <string name="importing_playlist">Playlist wird importiert …</string>
+    <string name="status_cached">gespeichert</string>
+    <string name="status_warnings">Hinweise im Diagnosebericht</string>
+    <string name="refreshing_in_background">Gespeicherte Liste · Aktualisierung im Hintergrund …</string>
+    <string name="refresh_failed">Gespeicherte Liste verfügbar · Aktualisierung fehlgeschlagen. Quelle erneut laden.</string>
+    <string name="operation_failed">Vorgang fehlgeschlagen</string>
+    <string name="saved_playlists">Gespeicherte Playlists</string>
+    <string name="source_remove">Quelle entfernen</string>
+    <string name="source_remove_confirm">Quelle „%1$s“ entfernen?</string>
+    <string name="source_remove_message">Die gespeicherte Quelle, ihre Anmeldung, ihr lokaler Katalog sowie „Zuletzt gesehen“, Favoriten und Wiedergabefortschritt dieser Quelle werden entfernt. Du kannst die Quelle anschließend erneut hinzufügen.</string>
+    <string name="playlist_address">Playlist-Adresse</string>
+    <string name="xmltv_address">XMLTV-Adresse</string>
+    <string name="xtream_title">Xtream Codes · Live, Filme und Serien</string>
+    <string name="epg_title">XMLTV-Programmführer</string>
+    <string name="epg_open_file">Datei öffnen</string>
+    <string name="epg_http_address">HTTP(S)-Adresse</string>
+    <string name="epg_imported">EPG importiert</string>
+    <string name="field_name">Name</string>
+    <string name="field_name_hint">z. B. Fernsehen</string>
+    <string name="field_url">HTTP(S)-URL</string>
+    <string name="field_server">Serveradresse</string>
+    <string name="field_server_hint">https://anbieter.example</string>
+    <string name="field_username">Benutzername</string>
+    <string name="field_password">Passwort</string>
+    <string name="field_invalid_url">Eine gültige HTTP(S)-Adresse eingeben.</string>
+    <string name="field_required">Dieses Feld ausfüllen.</string>
+    <string name="source_checking">Quelle wird geprüft und geladen …</string>
+    <string name="no_file_picker">Keine Dateiauswahl installiert. Bitte URL-Import verwenden.</string>
+    <string name="file_default_name">Datei</string>
+    <string name="progress_reading_file">Datei wird gelesen …</string>
+    <string name="progress_downloading">Playlist wird heruntergeladen …</string>
+    <string name="progress_checking_login">Anmeldung wird geprüft …</string>
+    <string name="progress_live_catalog">Live-Katalog wird geladen …</string>
+    <string name="progress_movie_catalog">Filmkatalog wird geladen …</string>
+    <string name="progress_series_catalog">Serienkatalog wird geladen …</string>
+    <string name="progress_parsing">Einträge werden verarbeitet …</string>
+    <string name="progress_opening">Katalog wird geöffnet …</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">Diagnosebericht</string>
+    <string name="diagnostics_clip">IPTV Diagnose</string>
+    <string name="exit_low_memory">Android hat die App wegen Arbeitsspeicherdruck beendet</string>
+    <string name="exit_native_crash">Nativer Absturz</string>
+    <string name="exit_anr">Die App reagierte nicht</string>
+    <string name="exit_crash">App-Absturz</string>
+    <string name="exit_other">Anderer oder unbekannter Beendigungsgrund</string>
+    <string name="exit_unavailable">Auf dieser Android-Version nicht verfügbar</string>
+
+    <!-- Errors -->
+    <string name="error_http_401">Der Anbieter lehnt die Anmeldung ab (HTTP 401). Zugangsdaten prüfen.</string>
+    <string name="error_http_403">Der Anbieter verweigert den Zugriff (HTTP 403). Konto oder Freigabe prüfen.</string>
+    <string name="error_http_not_found">Die Adresse wurde nicht gefunden oder ist nicht mehr verfügbar (HTTP %1$d). Adresse prüfen oder eine andere Quelle wählen.</string>
+    <string name="error_http_429">Zu viele Anfragen beim Anbieter (HTTP 429). Bitte später erneut versuchen.</string>
+    <string name="error_http_server">Der Anbieter meldet einen Serverfehler (HTTP %1$d). Bitte später erneut versuchen.</string>
+    <string name="error_http_other">Der Anbieter meldet HTTP %1$d. Quelle prüfen oder später erneut versuchen.</string>
+    <string name="error_dns">Der Servername konnte nicht aufgelöst werden. Netzwerk und Anbieteradresse prüfen.</string>
+    <string name="error_connect">Die Verbindung zum Server konnte nicht aufgebaut werden. Netzwerk und Anbieter prüfen.</string>
+    <string name="error_timeout">Der Server hat nicht rechtzeitig geantwortet. Verbindung prüfen und erneut versuchen.</string>
+    <string name="error_tls">Die sichere Verbindung ist fehlgeschlagen. Zertifikat und Gerätezeit prüfen.</string>
+    <string name="error_file_denied">Der Zugriff auf die Datei wurde verweigert. Bitte die Datei erneut auswählen.</string>
+    <string name="error_file_missing">Die Datei kann nicht mehr geöffnet werden. Bitte erneut auswählen.</string>
+    <string name="error_disk_full">Der Gerätespeicher reicht für den Import nicht aus. Bitte Speicherplatz freigeben.</string>
+    <string name="error_memory">Der Arbeitsspeicher reicht für diesen Vorgang nicht aus. Andere Apps schließen oder eine kleinere Liste verwenden.</string>
+    <string name="error_import_too_large">Die Importgrenze von 512 MiB wurde überschritten. Beim Anbieter eine kleinere Liste anfordern.</string>
+    <string name="error_too_many_channels">Die Importgrenze von 2.000.000 Einträgen wurde überschritten. Die Auswahl beim Anbieter eingrenzen.</string>
+    <string name="error_too_many_categories">Die Importgrenze von 20.000 Kategorien wurde überschritten. Die Auswahl beim Anbieter eingrenzen.</string>
+    <string name="error_invalid_playlist">Die Quelle liefert keine gültige Playlist, möglicherweise eine Webseite. Den direkten M3U-Link oder eine andere Datei auswählen.</string>
+    <string name="error_empty_playlist">Die Liste enthält keine unterstützten Einträge. Eine andere Playlist auswählen.</string>
+    <string name="error_invalid_catalog">Der Anbieter liefert ungültige Katalogdaten. Später erneut versuchen oder den Anbieter kontaktieren.</string>
+    <string name="error_xtream_auth">Die Xtream-Anmeldung wurde abgelehnt. Zugangsdaten prüfen.</string>
+    <string name="error_xtream_inactive">Das Xtream-Konto ist abgelaufen, gesperrt oder nicht aktiv. Den Kontostatus beim Anbieter prüfen.</string>
+    <string name="error_empty_series">Der Anbieter liefert keine abspielbaren Episoden für diese Serie. Eine andere Serie wählen.</string>
+    <string name="error_response_too_large">Die Anbieterantwort überschreitet die zulässige Größe. Die Auswahl beim Anbieter eingrenzen.</string>
+    <string name="error_format_unsupported">Dieses Gerät unterstützt das Stream-Format nicht. Eine andere Variante oder einen anderen Eintrag wählen.</string>
+    <string name="error_decoder">Der Video-Decoder konnte nicht gestartet werden. Andere Video-Apps schließen oder eine andere Stream-Variante wählen. Details stehen im Diagnosebericht.</string>
+    <string name="error_protocol">Dieses Stream-Protokoll wird auf Android noch nicht unterstützt. Eine HTTP(S)- oder RTSP-Quelle wählen.</string>
+    <string name="error_stale_revision">Die Playlist wurde inzwischen gewechselt. Bitte erneut auswählen.</string>
+    <string name="error_io">Die Daten konnten nicht vollständig gelesen oder gespeichert werden. Details enthalten den betroffenen Schritt.</string>
+    <string name="error_catalog">Der gespeicherte Katalog kann nicht verwendet werden. Bitte die Quelle neu laden.</string>
+    <string name="error_invalid_source">Die Quellenadresse ist ungültig. Bitte Adresse und Eingaben prüfen.</string>
+    <string name="error_source_save">Die Liste wurde geladen, die Quelle konnte aber nicht gespeichert werden. Speicherplatz prüfen und die Quelle erneut hinzufügen.</string>
+    <string name="error_unknown">Der Vorgang ist fehlgeschlagen. Der Diagnosebericht enthält den Fehlercode und den betroffenen Schritt.</string>
 </resources>

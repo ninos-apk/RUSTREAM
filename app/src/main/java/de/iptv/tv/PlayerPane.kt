@@ -31,14 +31,14 @@ class PlayerPane(
 ) : FrameLayout(context) {
     val video = PlayerView(context).apply {
         id = View.generateViewId(); useController = false; isFocusable = true; isFocusableInTouchMode = true
-        contentDescription = "Video und Wiedergabesteuerung"; setBackgroundColor(Color.BLACK)
+        contentDescription = context.getString(R.string.player_video); setBackgroundColor(Color.BLACK)
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
-    private val empty = TvUi.text(context, "Wähle links einen Sender, Film oder eine Serienepisode aus.", 17f, TvUi.muted).apply {
+    private val empty = TvUi.text(context, context.getString(R.string.player_empty), 17f, TvUi.muted).apply {
         gravity = Gravity.CENTER; setPadding(dp(20), dp(16), dp(20), dp(16)); setLineSpacing(0f, 1.4f)
     }
     private val overlay = LinearLayout(context).apply {
-        id = View.generateViewId(); contentDescription = "Wiedergabesteuerung"; orientation = LinearLayout.VERTICAL
+        id = View.generateViewId(); contentDescription = context.getString(R.string.player_controls); orientation = LinearLayout.VERTICAL
         setPadding(dp(12), dp(8), dp(12), dp(8))
         background = TvUi.surface(0xF2091018.toInt())
         visibility = View.GONE
@@ -59,7 +59,7 @@ class PlayerPane(
         background = TvUi.surface(0xFA131923.toInt(), dp(8).toFloat())
         setPadding(dp(16), dp(8), dp(16), dp(8))
     }
-    private val focusHint = TvUi.text(context, "OK: Vollbild  ·  ↓ Steuerung", 12f).apply {
+    private val focusHint = TvUi.text(context, context.getString(R.string.player_focus_hint), 12f).apply {
         gravity = Gravity.CENTER; setPadding(dp(12), dp(6), dp(12), dp(6))
         background = TvUi.surface(TvUi.panel, dp(6).toFloat()); visibility = View.GONE
     }
@@ -95,7 +95,7 @@ class PlayerPane(
     }
 
     init {
-        id = View.generateViewId(); contentDescription = "Videobereich"; setBackgroundColor(Color.BLACK)
+        id = View.generateViewId(); contentDescription = context.getString(R.string.player_area); setBackgroundColor(Color.BLACK)
         addView(video, LayoutParams(-1, -1)); addView(empty, LayoutParams(-1, -1))
         addView(info, LayoutParams(-1, -2, Gravity.TOP))
         val timeline = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -104,11 +104,11 @@ class PlayerPane(
         overlay.addView(timeline)
         val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; clipChildren = false; clipToPadding = false }
         for ((key, symbol, label) in listOf(
-            Triple("back", "back", "30 Sekunden zurück"), Triple("play", "play", "Wiedergabe starten"),
-            Triple("forward", "forward", "30 Sekunden vor"), Triple("stop", "stop", "Stopp"), Triple("fullscreen", "fullscreen", "Vollbild"),
-            Triple("favorite", "star", "Zu Favoriten hinzufügen")
+            Triple("back", "back", R.string.player_back_30), Triple("play", "play", R.string.player_play),
+            Triple("forward", "forward", R.string.player_forward_30), Triple("stop", "stop", R.string.player_stop), Triple("fullscreen", "fullscreen", R.string.player_fullscreen),
+            Triple("favorite", "star", R.string.favorite_add)
         )) {
-            val button = TvIconButton(context, symbol, label) { touch(); cancelSeek(); action(key) }.apply { id = View.generateViewId() }
+            val button = TvIconButton(context, symbol, context.getString(label)) { touch(); cancelSeek(); action(key) }.apply { id = View.generateViewId() }
             TvUi.focus(button, 1f) { focused -> if (focused) { caption.text = button.contentDescription; touch() } }
             buttons[key] = button
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
@@ -140,7 +140,7 @@ class PlayerPane(
         buttons.getValue("favorite").apply {
             val wanted = if (active == true) "star_on" else "star"
             if (symbol != wanted) { symbol = wanted; invalidate() }
-            contentDescription = if (active == true) "Aus Favoriten entfernen" else "Zu Favoriten hinzufügen"
+            contentDescription = context.getString(if (active == true) R.string.favorite_remove else R.string.favorite_add)
             val available = hasSelection && active != null
             isEnabled = available; isFocusable = available
             if (hasFocus()) caption.text = contentDescription
@@ -152,7 +152,7 @@ class PlayerPane(
     private fun updateInfo() {
         val urgent = lastStats.phase in setOf("connecting", "buffering", "waiting", "error")
         info.visibility = if (isFullscreen && (controlsVisible || urgent)) View.VISIBLE else View.GONE
-        val detail = if (lastStats.phase == "error") "Zurück zur Übersicht · Refresh oder andere Quelle wählen" else guideText
+        val detail = if (lastStats.phase == "error") context.getString(R.string.player_error_hint) else guideText
         info.text = listOf(statusText, detail).filter { it.isNotBlank() }.joinToString("\n")
     }
     private fun updateFocus() {
@@ -165,7 +165,7 @@ class PlayerPane(
         val play = buttons.getValue("play")
         val symbol = if (stats.playing) "pause" else "play"
         if (play.symbol != symbol) { play.symbol = symbol; play.invalidate() }
-        play.contentDescription = if (stats.playing) "Pause" else "Wiedergabe starten"
+        play.contentDescription = context.getString(if (stats.playing) R.string.player_pause else R.string.player_play)
         play.isEnabled = hasSelection
         buttons.getValue("stop").isEnabled = video.player != null
         for (key in listOf("back", "forward")) buttons.getValue(key).apply { isEnabled = stats.seekable; isFocusable = stats.seekable }
@@ -199,7 +199,7 @@ class PlayerPane(
     fun setFullscreen(value: Boolean, fill: Boolean) {
         cancelSeek(); isFullscreen = value
         video.resizeMode = if (value && fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
-        buttons.getValue("fullscreen").apply { symbol = if (value) "restore" else "fullscreen"; contentDescription = if (value) "Vollbild verlassen" else "Vollbild"; invalidate() }
+        buttons.getValue("fullscreen").apply { symbol = if (value) "restore" else "fullscreen"; contentDescription = context.getString(if (value) R.string.player_fullscreen_exit else R.string.player_fullscreen); invalidate() }
         hideControls(); video.requestFocus(); updateFocus(); updateInfo()
     }
     fun cancelSeek() {
@@ -227,7 +227,7 @@ class PlayerPane(
         }
     }
     private fun showSeek(position: Long, now: Long, accelerated: Boolean, value: Int = hold.direction) {
-        val direction = if (value > 0) "Vorspulen" else "Zurückspulen"
+        val direction = context.getString(if (value > 0) R.string.player_fast_forward else R.string.player_rewind)
         flash(if (accelerated) "$direction · ${hold.speed(now).toInt()} s/s · ${clock(position)}" else "${if (value > 0) "+30 s" else "−30 s"} · ${clock(position)}")
         updateTimeline(position)
     }
@@ -249,7 +249,7 @@ class PlayerPane(
                 if (!isFullscreen) { if (event.repeatCount == 0) { hideControls(); action(if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) "library" else "statistics") } }
                 else if (lastStats.seekable && !lastStats.live && hasSelection) {
                     if (heldKey != event.keyCode) startSeek(event.keyCode)
-                } else if (event.repeatCount == 0) flash("LIVE · Spulen nicht verfügbar")
+                } else if (event.repeatCount == 0) flash(context.getString(R.string.player_live_no_seek))
                 return true
             }
         }

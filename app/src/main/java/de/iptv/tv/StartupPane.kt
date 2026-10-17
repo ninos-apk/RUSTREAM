@@ -17,8 +17,8 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
     private val brand = TvUi.text(context, context.getString(R.string.app_name), 28f).apply {
         gravity = Gravity.CENTER; letterSpacing = .06f; setTypeface(typeface, Typeface.BOLD)
     }
-    private val heading = TvUi.text(context, "Dein Programm wird vorbereitet", 22f).apply { gravity = Gravity.CENTER }
-    private val message = TvUi.text(context, "Gespeicherte Quelle wird geladen …", 16f, TvUi.muted).apply {
+    private val heading = TvUi.text(context, context.getString(R.string.startup_preparing), 22f).apply { gravity = Gravity.CENTER }
+    private val message = TvUi.text(context, context.getString(R.string.loading_saved_source), 16f, TvUi.muted).apply {
         gravity = Gravity.CENTER; setLineSpacing(0f, 1.4f)
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
@@ -27,8 +27,8 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
         indeterminateTintList = android.content.res.ColorStateList.valueOf(TvUi.accent)
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    private val retryButton = TvUi.button(context, "Erneut versuchen", retry)
-    private val sourceButton = TvUi.button(context, "Quelle hinzufügen", sources)
+    private val retryButton = TvUi.button(context, context.getString(R.string.retry), retry)
+    private val sourceButton = TvUi.button(context, context.getString(R.string.source_add), sources)
     var loading = false; private set
     init {
         id = View.generateViewId()
@@ -55,7 +55,7 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
     fun showLoading(value: String) {
         val first = visibility != View.VISIBLE || !loading
         visibility = View.VISIBLE; loading = true
-        heading.text = "Dein Programm wird vorbereitet"
+        heading.setText(R.string.startup_preparing)
         message.text = value
         progress.visibility = if (TvUi.animationsEnabled(context)) View.VISIBLE else View.INVISIBLE
         retryButton.visibility = View.GONE; sourceButton.visibility = View.GONE
@@ -66,15 +66,15 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
     }
     fun updateProgress(value: String) { if (loading) message.text = value }
     fun showEmpty() {
-        showMessage("Dein Fernsehen beginnt hier", "Füge eine Playlist oder eine Xtream-Quelle hinzu, um Sender, Filme und Serien zu laden.", false)
+        showMessage(context.getString(R.string.startup_empty_title), context.getString(R.string.startup_empty_message), false)
     }
-    fun showError(value: String) { showMessage("Quelle konnte nicht geladen werden", value, true) }
+    fun showError(value: String) { showMessage(context.getString(R.string.startup_error_title), value, true) }
     private fun showMessage(title: String, value: String, failed: Boolean) {
         loading = false; visibility = View.VISIBLE
         brand.animate().cancel(); brand.alpha = 1f
         heading.text = title; message.text = value; progress.visibility = View.GONE
         retryButton.visibility = if (failed) View.VISIBLE else View.GONE
-        sourceButton.text = if (failed) "Quelle wählen" else "Quelle hinzufügen"
+        sourceButton.setText(if (failed) R.string.source_choose else R.string.source_add)
         sourceButton.visibility = View.VISIBLE
         (if (failed) retryButton else sourceButton).requestFocus()
     }

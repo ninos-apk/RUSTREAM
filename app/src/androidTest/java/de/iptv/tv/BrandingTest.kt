@@ -40,11 +40,13 @@ class BrandingTest {
                 assertTrue(device.wait(Until.hasObject(By.text("Einstellungen")),5_000))
                 assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
                 // Remote navigation scrolls the existing settings menu down to its final action.
-                repeat(9){device.pressDPadDown()}
+                repeat(10){device.pressDPadDown()}
                 assertTrue(device.wait(Until.hasObject(By.text("App-Info").focused(true)),5_000))
                 device.pressDPadCenter()
-                assertTrue(device.wait(Until.hasObject(By.text(context.getString(R.string.app_description))),5_000))
-                assertTrue(device.hasObject(By.text(context.getString(R.string.app_version,BuildConfig.VERSION_NAME))))
+                // The app shows its own language (AppLanguage), not necessarily the emulator system language.
+                val appText=AppLanguage.wrap(context)
+                assertTrue(device.wait(Until.hasObject(By.text(appText.getString(R.string.app_description))),5_000))
+                assertTrue(device.hasObject(By.text(appText.getString(R.string.app_version,BuildConfig.VERSION_NAME))))
                 assertTrue(device.hasObject(By.text("developed by Ninos Oshana")))
                 device.executeShellCommand("screencap -p /sdcard/Download/rustream-app-info.png")
                 device.pressBack()
@@ -54,5 +56,38 @@ class BrandingTest {
             device.executeShellCommand("screencap -p /sdcard/Download/rustream-installed-info.png")
             device.pressBack()
         }finally{store.save(previous)}
+    }
+    @Test fun languageSettingSwitchesTheWholeInterfaceAndBack(){
+        val store=SourceStore(context);val previous=store.load()
+        fun chooseLanguage(settings:String,entry:String,index:Int){
+            device.pressDPadCenter()
+            assertTrue(device.wait(Until.hasObject(By.text(settings)),5_000))
+            repeat(8){device.pressDPadDown()}
+            assertTrue(device.wait(Until.hasObject(By.text(entry).focused(true)),5_000))
+            device.pressDPadCenter()
+            assertTrue(device.wait(Until.hasObject(By.text("English")),5_000))
+            // The dialog focuses the checked language; English is the second choice.
+            if(index==1)device.pressDPadDown() else device.pressDPadUp()
+            device.pressDPadCenter()
+        }
+        try{
+            store.save(emptyList())
+            withTvActivity{ scenario->
+                assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
+                chooseLanguage("Einstellungen","Sprache · Language",1)
+                // The rebuilt activity shows every text, including the startup screen, in English.
+                assertTrue(device.wait(Until.hasObject(By.text("Add source").focused(true)),10_000))
+                assertTrue(device.hasObject(By.text("Your TV starts here")))
+                device.executeShellCommand("screencap -p /sdcard/Download/rustream-language-en.png")
+                chooseLanguage("Settings","Language · Sprache",0)
+                assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
+                assertEquals("de",AppLanguage.current(context))
+                // Track the rebuilt activity so the rule finishes it, not only the replaced one.
+                scenario.onTvActivity{}
+            }
+        }finally{
+            store.save(previous)
+            context.getSharedPreferences("MainActivity",android.content.Context.MODE_PRIVATE).edit().remove("language").commit()
+        }
     }
 }

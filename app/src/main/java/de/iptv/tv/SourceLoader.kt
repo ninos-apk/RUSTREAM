@@ -44,7 +44,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
         .readTimeout(30,TimeUnit.SECONDS).callTimeout(90,TimeUnit.SECONDS).followSslRedirects(false).build()
     private val catalogs by lazy { CatalogStore(context) }
     @Volatile var lastReport = JSONObject(); private set
-    var progress: (String) -> Unit = {}
+    /** Receives a string resource, so the loader stays independent of the UI language. */
+    var progress: (Int) -> Unit = {}
     suspend fun identity(source:JSONObject):String=withContext(Dispatchers.IO){catalogs.id(source)}
     suspend fun restore(source: JSONObject, core: Core): JSONObject? = withContext(Dispatchers.IO) {
         val started=System.nanoTime()
@@ -76,7 +77,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
             val previous = if(epg) null else catalogs.entry(source)
             when(source.getString("kind")) {
                 "file" -> {
-                    stage = "copy_file"; progress("Datei wird gelesen …")
+                    stage = "copy_file"; progress(R.string.progress_reading_file)
                     val before = elapsed()
                     validators=fileSignature(source)
                     val input=context.contentResolver.openInputStream(Uri.parse(source.getString("uri"))) ?: throw ImportFailure("file_not_found",stage)
@@ -84,7 +85,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                     report.put("copy_ms",elapsed()-before)
                 }
                 "url" -> {
-                    stage = "download"; progress("Playlist wird heruntergeladen …")
+                    stage = "download"; progress(R.string.progress_downloading)
                     val before=elapsed()
                     val downloaded=fetch(source.getString("url"),temporary,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,previous?.takeIf{it.optInt("schema")==CatalogStore.SCHEMA}?.optJSONObject("validators"))
                     if(downloaded.optBoolean("not_modified")) {
@@ -99,7 +100,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                     report.put("download_ms",elapsed()-before).put("bytes",temporary.length())
                 }
                 "xtream" -> {
-                    stage="xtream_account"; progress("Anmeldung wird geprüft …")
+                    stage="xtream_account"; progress(R.string.progress_checking_login)
                     val server=server(source)
                     var remaining=BoundedCopy.LIMIT
                     suspend fun api(action:String?,limit:Long=remaining):File {
@@ -123,7 +124,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                         Triple("movies","get_vod_categories","get_vod_streams"),
                         Triple("series","get_series_categories","get_series"))) {
                         if(field=="movies"&&!source.optBoolean("vod",true))continue
-                        stage="xtream_$field";progress(when(field){"live"->"Live-Katalog wird geladen …";"movies"->"Filmkatalog wird geladen …";else->"Serienkatalog wird geladen …"})
+                        stage="xtream_$field";progress(when(field){"live"->R.string.progress_live_catalog;"movies"->R.string.progress_movie_catalog;else->R.string.progress_series_catalog})
                         try {
                             val categories=api(categoryAction,8L*1024*1024)
                             val streams=api(streamAction)
@@ -141,7 +142,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 else -> throw ImportFailure("invalid_source",stage)
             }
             coroutine.ensureActive()
-            stage="parse_catalog";progress("Einträge werden verarbeitet …")
+            stage="parse_catalog";progress(R.string.progress_parsing)
             val result:JSONObject
             if(epg) {
                 result=core.call("epg_import","path" to temporary.absolutePath)
@@ -152,7 +153,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 val parsed=Core().use { worker -> worker.call("build_catalog","path" to temporary.absolutePath,"base" to base,
                     "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream"),"salt" to salt) }
                 report.put("parse_ms",parsed.getDouble("import_ms"))
-                stage="commit_catalog";progress("Katalog wird geöffnet …")
+                stage="commit_catalog";progress(R.string.progress_opening)
                 check(parsed.getInt("schema")==CatalogStore.SCHEMA){"catalog_incompatible"}
                 Core().use { checkCore -> checkCore.call("open_catalog","path" to file.absolutePath,"key" to key) }
                 catalogs.commit(source,file,key,validators,warnings.length()>0,warnings,parsed.getInt("schema"),salt)

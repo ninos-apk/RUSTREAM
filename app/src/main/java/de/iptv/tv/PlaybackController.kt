@@ -102,7 +102,7 @@ class PlaybackController(
                     }
                 } catch (error: Exception) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
-                    status("Wiedergabesteuerung fehlgeschlagen")
+                    status(context.getString(R.string.playback_control_failed))
                 }
                 delay(1_000)
             }
@@ -139,7 +139,7 @@ class PlaybackController(
         releasePlayer()
         phase = "idle"
         metrics(PlaybackStats())
-        status("Gestoppt")
+        status(context.getString(R.string.playback_stopped))
     }
     suspend fun seek(deltaMs: Long) = operations.withLock {
         val p = player ?: return@withLock
@@ -169,13 +169,13 @@ class PlaybackController(
             } else cancelRetry()
             if (phase == "finished") { terminal = true }
             val label = when (phase) {
-                "playing" -> "Wiedergabe"
-                "buffering" -> "Puffer wird gefüllt"
-                "connecting" -> "Verbinde …"
-                "waiting" -> "Verbindung unterbrochen · Versuch ${command.optInt("retries")}"
-                "paused" -> "Pausiert"
-                "finished" -> "Wiedergabe beendet"
-                else -> "Kanal auswählen"
+                "playing" -> context.getString(R.string.playback_playing)
+                "buffering" -> context.getString(R.string.playback_buffering)
+                "connecting" -> context.getString(R.string.playback_connecting)
+                "waiting" -> context.getString(R.string.playback_waiting, command.optInt("retries"))
+                "paused" -> context.getString(R.string.playback_paused)
+                "finished" -> context.getString(R.string.playback_finished)
+                else -> context.getString(R.string.playback_idle)
             }
             status(if (title.isEmpty()) label else "$label · $title")
             return
@@ -232,8 +232,8 @@ class PlaybackController(
                     terminal = true
                     phase = "error"
                     scope.launch { operations.withLock { if (player === p && attempt == token) core.call("pause", "paused" to true) } }
-                    status(detail.message)
-                } else scope.launch { operations.withLock { if (player === p && attempt == token) {apply(core.call("ended", "attempt" to token, "error" to true));status("${detail.message} · Neuer Versuch wird vorbereitet.")} } }
+                    status(detail.message(context))
+                } else scope.launch { operations.withLock { if (player === p && attempt == token) {apply(core.call("ended", "attempt" to token, "error" to true));status(context.getString(R.string.playback_retrying, detail.message(context)))} } }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (player !== p || attempt != token) return
@@ -253,7 +253,7 @@ class PlaybackController(
         core.call("pause", "paused" to userPaused)
         if (player !== p || attempt != token) { return }
         p.playWhenReady = !userPaused
-        status("Verbinde · $title")
+        status(context.getString(R.string.playback_connecting_title, title))
         publishStats()
     }
     private fun cancelRetry() { retry?.cancel(); retry = null }

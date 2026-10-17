@@ -40,6 +40,8 @@ android {
     sourceSets.getByName("androidTest").assets.setSrcDirs(listOf(layout.buildDirectory.dir("generated/safeTestAssets")))
     testOptions { unitTests.isReturnDefaultValues = true }
     lint { abortOnError = true; checkReleaseBuilds = true }
+    // The language is chosen in the app: every bundle install needs both German and English strings.
+    bundle { language { enableSplit = false } }
 }
 val buildRust by tasks.registering(Exec::class) {
     workingDir(rootDir)
