@@ -8,7 +8,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.ImageView
 
@@ -22,11 +21,7 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
         gravity = Gravity.CENTER; setLineSpacing(0f, 1.4f)
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
-    private val progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-        isIndeterminate = true
-        indeterminateTintList = android.content.res.ColorStateList.valueOf(TvUi.accent)
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
+    private val progress = ImportProgressView(context)
     private val retryButton = TvUi.button(context, context.getString(R.string.retry), retry)
     private val sourceButton = TvUi.button(context, context.getString(R.string.source_add), sources)
     var loading = false; private set
@@ -46,7 +41,7 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
         content.addView(TvUi.text(context, "LIVE  /  MOVIES  /  SERIES", 11f, TvUi.accent).apply { gravity = Gravity.CENTER; letterSpacing = .12f }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = TvUi.dp(context, 24) })
         content.addView(heading, LinearLayout.LayoutParams(-1, -2))
         content.addView(message, LinearLayout.LayoutParams(-1, -2).apply { topMargin = TvUi.dp(context, 12) })
-        content.addView(progress, LinearLayout.LayoutParams(TvUi.dp(context, 180), TvUi.dp(context, 4)).apply { topMargin = TvUi.dp(context, 24); bottomMargin = TvUi.dp(context, 18) })
+        content.addView(progress, LinearLayout.LayoutParams(TvUi.dp(context, 260), -2).apply { topMargin = TvUi.dp(context, 24); bottomMargin = TvUi.dp(context, 18) })
         content.addView(retryButton, LinearLayout.LayoutParams(-2, -2))
         content.addView(sourceButton, LinearLayout.LayoutParams(-2, -2).apply { topMargin = TvUi.dp(context, 8) })
         val scroll = ScrollView(context).apply { isFillViewport = true; addView(content) }
@@ -57,14 +52,20 @@ class StartupPane(context: Context, private val retry: () -> Unit, private val s
         visibility = View.VISIBLE; loading = true
         heading.setText(R.string.startup_preparing)
         message.text = value
-        progress.visibility = if (TvUi.animationsEnabled(context)) View.VISIBLE else View.INVISIBLE
+        progress.visibility = View.VISIBLE; progress.update(null)
         retryButton.visibility = View.GONE; sourceButton.visibility = View.GONE
         requestFocus()
         if (first && TvUi.animationsEnabled(context)) {
             brand.alpha = 0f; brand.animate().alpha(1f).setDuration(280).start()
         }
     }
-    fun updateProgress(value: String) { if (loading) message.text = value }
+    fun updateProgress(value: String, state: ImportProgress? = null) {
+        if (loading) {
+            if(state!=null)heading.setText(R.string.import_progress_title)
+            if(message.text.toString()!=value)message.text = value
+            progress.update(state)
+        }
+    }
     fun showEmpty() {
         showMessage(context.getString(R.string.startup_empty_title), context.getString(R.string.startup_empty_message), false)
     }

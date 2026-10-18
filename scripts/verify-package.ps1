@@ -16,7 +16,7 @@ foreach ($abi in @('arm64-v8a','armeabi-v7a','x86_64')) {
         if ([Convert]::ToInt64($alignment.Replace('0x',''), 16) -lt 16384) { throw "Invalid ELF alignment: $abi $alignment" }
     }
     $symbols = & $readelf --dyn-syms $native
-    foreach ($method in @('nativeCreate','nativeRequest','nativeDestroy','nativeCancel')) {
+    foreach ($method in @('nativeCreate','nativeRequest','nativeDestroy','nativeCancel','nativeImportProgress')) {
         if (!($symbols -match "Java_de_iptv_tv_NativeBridge_$method")) { throw "JNI export missing: $method $abi" }
     }
     Write-Host "$abi : ELF LOAD alignment >=16 KiB, JNI exports present"

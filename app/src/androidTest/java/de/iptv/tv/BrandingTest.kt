@@ -18,6 +18,24 @@ class BrandingTest {
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private val context=instrumentation.targetContext
     private val device=UiDevice.getInstance(instrumentation)
+    @Test fun freshInstallStartsInEnglishAndKeepsAnExplicitGermanChoice(){
+        val store=SourceStore(context);val previous=store.load()
+        val preferences=context.getSharedPreferences("MainActivity",android.content.Context.MODE_PRIVATE)
+        try {
+            store.save(emptyList())
+            preferences.edit().remove("language").commit()
+            assertEquals("en",AppLanguage.current(context))
+            withTvActivity {
+                assertTrue(device.wait(Until.hasObject(By.text("Add source").focused(true)),10_000))
+                assertTrue(device.hasObject(By.text("Your TV starts here")))
+            }
+            AppLanguage.save(context,"de")
+            withTvActivity {
+                assertTrue(device.wait(Until.hasObject(By.text("Quelle hinzufügen").focused(true)),10_000))
+                assertEquals("de",AppLanguage.current(context))
+            }
+        } finally { store.save(previous) }
+    }
     @Test fun installedMetadataStartupAndAboutUseRustreamBranding(){
         val manager=context.packageManager
         val application=manager.getApplicationInfo(context.packageName,0)
@@ -45,10 +63,13 @@ class BrandingTest {
                 device.pressDPadCenter()
                 // The app shows its own language (AppLanguage), not necessarily the emulator system language.
                 val appText=AppLanguage.wrap(context)
-                assertTrue(device.wait(Until.hasObject(By.text(appText.getString(R.string.app_description))),5_000))
-                assertTrue(device.hasObject(By.text(appText.getString(R.string.app_version,BuildConfig.VERSION_NAME))))
-                assertTrue(device.hasObject(By.text("developed by Ninos Oshana")))
+                assertTrue(device.wait(Until.hasObject(By.text(appText.getString(R.string.about_title))),5_000))
+                assertTrue(device.hasObject(By.text(appText.getString(R.string.about_version,BuildConfig.VERSION_NAME))))
+                assertTrue(device.hasObject(By.text(appText.getString(R.string.about_developer))))
                 device.executeShellCommand("screencap -p /sdcard/Download/rustream-app-info.png")
+                repeat(12){if(!device.hasObject(By.text(appText.getString(R.string.about_paypal)).focused(true)))device.pressDPadDown()}
+                assertTrue("PayPal email is reachable with the remote",device.wait(Until.hasObject(By.text(appText.getString(R.string.about_paypal)).focused(true)),5_000))
+                device.executeShellCommand("screencap -p /sdcard/Download/rustream-app-info-support.png")
                 device.pressBack()
             }
             context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

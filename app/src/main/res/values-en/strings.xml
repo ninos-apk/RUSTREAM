@@ -2,6 +2,18 @@
     <string name="app_description">RUSTREAM IPTV PLAYER is an IPTV player built around a core written in Rust. It focuses on high performance and smooth streaming – especially for live sports and football.</string>
     <string name="app_info">App info</string>
     <string name="app_version">Version %1$s</string>
+    <string name="about_title">About Rustream IPTV Player</string>
+    <string name="about_version">Version: %1$s</string>
+    <string name="about_developer">Developed by: Ninos Oshana</string>
+    <string name="about_intro">Rustream IPTV Player is built from the ground up with one goal in mind: <b>performance, stability, and a smooth streaming experience.</b></string>
+    <string name="about_technology">Powered by a Rust core and modern Kotlin streaming technologies, Rustream is designed to handle connection issues intelligently, recover automatically, rebuild interrupted connections, and optimize buffering for reliable playback.</string>
+    <string name="about_independent">Rustream is developed independently, from scratch, by a single developer with a strong focus on efficiency, reliability, and performance.</string>
+    <string name="about_support_title">Enjoying Rustream? Support the developer!</string>
+    <string name="about_support_body">If you appreciate the stability, performance, and work behind Rustream, consider supporting its continued development through PayPal:</string>
+    <string name="about_contribution">Every contribution is greatly appreciated and helps support the time and effort behind this project.</string>
+    <string name="about_contact">Have a question, feedback, or want to report an issue? Feel free to send an email. Your feedback is always welcome.</string>
+    <string name="about_thanks">Thank you for using Rustream IPTV Player!</string>
+    <string name="about_email_unavailable">No email app is installed on this TV. You can copy the address and use it on another device.</string>
 
     <!-- General -->
     <string name="close">Close</string>
@@ -233,6 +245,12 @@
     <string name="progress_series_catalog">Loading series catalog …</string>
     <string name="progress_parsing">Processing entries …</string>
     <string name="progress_opening">Opening catalog …</string>
+    <string name="import_progress_title">Importing playlist</string>
+    <string name="progress_finalizing">Building library indexes …</string>
+    <string name="progress_step">Step %1$d of 3 · %2$s</string>
+    <string name="progress_percent">%1$d%%</string>
+    <string name="progress_bytes">%1$.1f MiB read</string>
+    <string name="progress_working">Working …</string>
 
     <!-- Diagnostics -->
     <string name="diagnostics_title">Diagnostic report</string>

@@ -30,8 +30,8 @@ object TvUi {
         setColor(color); cornerRadius = radius
         if (stroke != null) setStroke(2, stroke)
     }
-    fun focusBackground(context: Context) = StateListDrawable().apply {
-        val radius = dp(context, 5).toFloat()
+    fun focusBackground(context: Context, radiusDp: Int = 5) = StateListDrawable().apply {
+        val radius = dp(context, radiusDp).toFloat()
         addState(intArrayOf(-android.R.attr.state_enabled), surface(panel, radius))
         addState(intArrayOf(android.R.attr.state_focused), surface(focused, radius, accent))
         addState(intArrayOf(android.R.attr.state_activated), surface(control, radius))

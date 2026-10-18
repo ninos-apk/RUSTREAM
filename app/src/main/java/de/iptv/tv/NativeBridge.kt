@@ -14,12 +14,14 @@ object NativeBridge {
     @JvmStatic external fun nativeCreate(): Long
     @JvmStatic external fun nativeDestroy(handle: Long)
     @JvmStatic external fun nativeCancel(handle: Long)
+    @JvmStatic external fun nativeImportProgress(handle: Long): Long
     @JvmStatic external fun nativeRequest(handle: Long, request: String): String
 }
 
 class Core : Closeable {
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "iptv-core") }
     @Volatile private var handle = NativeBridge.nativeCreate().also { check(it != 0L) { "Rust-Core nicht verfügbar" } }
+    fun importProgress(): Long = NativeBridge.nativeImportProgress(handle)
     suspend fun call(op: String, vararg fields: Pair<String, Any?>): JSONObject = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { if (handle != 0L) NativeBridge.nativeCancel(handle) }
         executor.execute {

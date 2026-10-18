@@ -31,6 +31,43 @@ class UiDesignTest {
     private val device=UiDevice.getInstance(instrumentation)
     private fun pane(activity:MainActivity)=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<PlayerPane>().first()
     private fun controller(activity:MainActivity)=MainActivity::class.java.getDeclaredField("playback").apply { isAccessible=true }.get(activity) as PlaybackController
+    private fun view(activity:MainActivity,name:String)=MainActivity::class.java.getDeclaredField(name).apply { isAccessible=true }.get(activity) as android.view.View
+    private fun details(activity:MainActivity)=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<ConnectionDetails>().first()
+    private fun checkPreviewVerticalPath(scenario:ActivityScenario<MainActivity>) {
+        device.pressDPadUp()
+        assertTrue(device.wait(Until.hasObject(By.desc("Einstellungen").focused(true)),5_000))
+        device.pressDPadDown()
+        waitFor("Settings down returns to preview",{pane(it).video.hasFocus()},scenario)
+        device.pressDPadDown()
+        waitFor("First down enters player controls",{pane(it).controlsVisible && !pane(it).video.hasFocus()},scenario)
+        device.pressDPadDown()
+        waitFor("Second down leaves controls for programme details",{view(it,"status").hasFocus() && !pane(it).controlsVisible},scenario)
+        device.pressDPadDown()
+        waitFor("Programme guide follows the title",{view(it,"epg").hasFocus()},scenario)
+        var enabled=false
+        scenario.onTvActivity {
+            enabled=details(it).refreshButton.isEnabled
+            assertFalse("Statistics are not a remote stop",details(it).statistics.isFocusable)
+            assertFalse("Statistics are not an action",details(it).statistics.isClickable)
+            assertFalse("Statistics cannot take input focus",details(it).statistics.requestFocus())
+        }
+        device.pressDPadDown()
+        if(enabled) {
+            waitFor("Guide down skips statistics and reaches Refresh",{details(it).refreshButton.hasFocus()},scenario)
+            device.pressDPadLeft()
+            waitFor("Refresh left returns to programme details",{view(it,"epg").hasFocus()},scenario)
+            device.pressDPadDown()
+            waitFor("Programme details down reaches Refresh again",{details(it).refreshButton.hasFocus()},scenario)
+            device.pressDPadUp()
+            waitFor("Refresh up skips statistics and returns to guide",{view(it,"epg").hasFocus()},scenario)
+        } else waitFor("Unavailable Refresh keeps focus on programme details",{view(it,"epg").hasFocus()},scenario)
+        device.pressDPadUp()
+        waitFor("Guide up returns to title",{view(it,"status").hasFocus()},scenario)
+        device.pressDPadUp()
+        waitFor("Details up returns to video",{pane(it).video.hasFocus()},scenario)
+        device.pressDPadDown();device.pressDPadUp()
+        waitFor("Controls up returns to video and hides controls",{pane(it).video.hasFocus() && !pane(it).controlsVisible},scenario)
+    }
     private fun waitFor(message:String,check:(MainActivity)->Boolean,scenario:ActivityScenario<MainActivity>) {
         val deadline=SystemClock.elapsedRealtime()+10_000
         var done=false
@@ -71,6 +108,19 @@ class UiDesignTest {
                 store.save(listOf(JSONObject().put("kind","file").put("name","UI Demo").put("uri",android.net.Uri.fromFile(file).toString())))
                 withTvActivity { scenario ->
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),15_000))
+                    scenario.onTvActivity { activity ->
+                        for(name in listOf("categories","channels")) {
+                            val rows=view(activity,name) as androidx.recyclerview.widget.RecyclerView
+                            val text=(rows.getChildAt(0) as ViewGroup).descendants.filterIsInstance<android.widget.TextView>().first()
+                            assertEquals("$name uses 11sp",11f,text.textSize/activity.resources.displayMetrics.scaledDensity,0.01f)
+                        }
+                        val logo=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<android.widget.ImageView>().first { it.contentDescription=="RUSTREAM IPTV PLAYER" }
+                        assertFalse("Brand image is not a remote stop",logo.isFocusable)
+                    }
+                    device.pressDPadRight()
+                    checkPreviewVerticalPath(scenario) // Includes the disabled Refresh case before selection.
+                    device.pressDPadLeft()
+                    assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),5_000))
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · UI Live")),15_000))
                     device.pressDPadRight()
@@ -78,6 +128,7 @@ class UiDesignTest {
                     SystemClock.sleep(1700)
                     scenario.onTvActivity { assertTrue(pane(it).previewFocusVisible);assertFalse(pane(it).buttons.containsKey("reconnect")) }
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-focus.png")
+                    checkPreviewVerticalPath(scenario)
                     device.pressDPadLeft()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),5_000))
                     lateinit var before:ExoPlayer
@@ -86,6 +137,10 @@ class UiDesignTest {
                     waitFor("Same active channel opens fullscreen",{pane(it).isFullscreen},scenario)
                     scenario.onTvActivity { assertSame(before,controller(it).player) }
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-fullscreen.png")
+                    device.pressDPadDown();device.pressDPadDown()
+                    waitFor("Fullscreen controls stay inside fullscreen on Down",{pane(it).isFullscreen && pane(it).buttons.values.any { button -> button.hasFocus() }},scenario)
+                    device.pressDPadUp()
+                    waitFor("Fullscreen controls up returns to video",{pane(it).video.hasFocus() && !pane(it).controlsVisible},scenario)
                     device.pressBack()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Live").focused(true)),5_000))
                     scenario.onTvActivity { activity ->
@@ -97,12 +152,19 @@ class UiDesignTest {
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-overview.png")
                     device.findObject(By.text("Movies (1)")).click()
                     assertTrue(device.wait(Until.hasObject(By.desc("UI Film")),5_000))
+                    scenario.onTvActivity { activity ->
+                        val card=(view(activity,"channels") as androidx.recyclerview.widget.RecyclerView).getChildAt(0) as ViewGroup
+                        val metadata=card.descendants.filterIsInstance<android.widget.TextView>().last()
+                        assertEquals("Movie metadata stays 8sp",8f,metadata.textSize/activity.resources.displayMetrics.scaledDensity,0.01f)
+                    }
                     scenario.onTvActivity { activity -> activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="UI Film" }.requestFocus() }
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Abspielen").focused(true)),5_000))
                     device.pressDPadCenter()
                     assertTrue(device.wait(Until.hasObject(By.text("Wiedergabe · UI Film")),10_000))
-                    device.pressDPadRight();device.pressDPadDown()
+                    device.pressDPadRight()
+                    checkPreviewVerticalPath(scenario)
+                    device.pressDPadDown()
                     assertTrue(device.wait(Until.hasObject(By.desc("Pause").focused(true)),5_000))
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-controls.png")
                 }

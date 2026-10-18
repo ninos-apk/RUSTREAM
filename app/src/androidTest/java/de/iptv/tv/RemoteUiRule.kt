@@ -8,12 +8,21 @@ import org.junit.rules.ExternalResource
  */
 class RemoteUiRule:ExternalResource(){
     private var previous=10_000L
+    private var previousLanguage:String?=null
+    private val preferences get()=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        .getSharedPreferences("MainActivity",android.content.Context.MODE_PRIVATE)
     override fun before(){
+        // Existing synthetic fixtures assert German UI text independently of the install default.
+        previousLanguage=preferences.getString("language",null)
+        preferences.edit().putString("language","de").commit()
         val config=Configurator.getInstance()
         previous=config.waitForIdleTimeout
         config.setWaitForIdleTimeout(0)
     }
-    override fun after(){Configurator.getInstance().setWaitForIdleTimeout(previous)}
+    override fun after(){
+        preferences.edit().apply { if(previousLanguage==null)remove("language") else putString("language",previousLanguage) }.commit()
+        Configurator.getInstance().setWaitForIdleTimeout(previous)
+    }
 }
 
 /** Finish on the main thread before ActivityScenario.close waits for global idle.

@@ -107,6 +107,21 @@ class ContentVisualTest {
                                 val focus=activity.currentFocus;assertNotNull("Remote focus: $name",focus)
                                 assertTrue("Focused action remains visible: $name",focus!!.getGlobalVisibleRect(Rect()))
                                 assertEquals(scale,activity.resources.configuration.fontScale,0.05f)
+                                if(name!="fullscreen") {
+                                    val footer=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<ConnectionDetails>().first()
+                                    val refresh=Rect();val statistic=Rect();val credit=Rect()
+                                    assertTrue(footer.refreshButton.getGlobalVisibleRect(refresh))
+                                    assertTrue(footer.statistics.getGlobalVisibleRect(statistic))
+                                    assertEquals("All statistic lines are visible",footer.statistics.height,statistic.height())
+                                    assertFalse("Statistics stay out of remote navigation",footer.statistics.isFocusable)
+                                    assertTrue("Refresh shares the statistics line",kotlin.math.abs(statistic.centerY()-refresh.centerY())<=1)
+                                    assertEquals("Refresh is completely visible",footer.refreshButton.width,refresh.width())
+                                    assertEquals("Refresh height is completely visible",footer.refreshButton.height,refresh.height())
+                                    val developer=footer.descendants.filterIsInstance<android.widget.TextView>().first { it.text==activity.getString(R.string.app_developer) }
+                                    assertTrue(developer.getGlobalVisibleRect(credit))
+                                    assertTrue("Developer credit sits below Refresh",credit.top>=refresh.bottom)
+                                    assertEquals("Refresh aligns with the trailing credit edge",credit.right,refresh.right)
+                                }
                             }
                             val directory=File(context.getExternalFilesDir(null),"content-screenshots").apply{mkdirs()}
                             assertTrue(device.takeScreenshot(File(directory,"$prefix-$name.png")))

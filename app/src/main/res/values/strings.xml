@@ -4,6 +4,20 @@
     <string name="app_info">App-Info</string>
     <string name="app_version">Version %1$s</string>
     <string name="app_developer" translatable="false">developed by Ninos Oshana</string>
+    <string name="about_title">Über Rustream IPTV Player</string>
+    <string name="about_version">Version: %1$s</string>
+    <string name="about_developer">Entwickelt von: Ninos Oshana</string>
+    <string name="about_intro">Rustream IPTV Player wurde von Grund auf mit einem Ziel entwickelt: <b>Leistung, Stabilität und ein reibungsloses Streaming-Erlebnis.</b></string>
+    <string name="about_technology">Mit einem Rust-Core und modernen Kotlin-Streaming-Technologien bewältigt Rustream Verbindungsprobleme intelligent, stellt die Wiedergabe automatisch wieder her, baut unterbrochene Verbindungen neu auf und optimiert die Pufferung für eine zuverlässige Wiedergabe.</string>
+    <string name="about_independent">Rustream wird unabhängig und von Grund auf von einem einzelnen Entwickler entwickelt, mit einem starken Fokus auf Effizienz, Zuverlässigkeit und Leistung.</string>
+    <string name="about_support_title">Rustream gefällt dir? Unterstütze den Entwickler!</string>
+    <string name="about_support_body">Wenn du die Stabilität, Leistung und Arbeit hinter Rustream schätzt, kannst du die weitere Entwicklung über PayPal unterstützen:</string>
+    <string name="about_paypal" translatable="false">PayPal: ninos-oshana@live.com</string>
+    <string name="about_email" translatable="false">ninos-oshana@live.com</string>
+    <string name="about_contribution">Jeder Beitrag wird sehr geschätzt und hilft, die Zeit und den Aufwand hinter diesem Projekt zu unterstützen.</string>
+    <string name="about_contact">Hast du Fragen, Feedback oder möchtest du ein Problem melden? Schreib gerne eine E-Mail. Dein Feedback ist jederzeit willkommen.</string>
+    <string name="about_thanks">Vielen Dank, dass du Rustream IPTV Player nutzt!</string>
+    <string name="about_email_unavailable">Auf diesem Fernseher ist keine E-Mail-App installiert. Du kannst die Adresse kopieren und auf einem anderen Gerät verwenden.</string>
 
     <!-- General -->
     <string name="close">Schließen</string>
@@ -235,6 +249,12 @@
     <string name="progress_series_catalog">Serienkatalog wird geladen …</string>
     <string name="progress_parsing">Einträge werden verarbeitet …</string>
     <string name="progress_opening">Katalog wird geöffnet …</string>
+    <string name="import_progress_title">Playlist importieren</string>
+    <string name="progress_finalizing">Bibliotheksindizes werden erstellt …</string>
+    <string name="progress_step">Schritt %1$d von 3 · %2$s</string>
+    <string name="progress_percent">%1$d%%</string>
+    <string name="progress_bytes">%1$.1f MiB gelesen</string>
+    <string name="progress_working">Wird bearbeitet …</string>
 
     <!-- Diagnostics -->
     <string name="diagnostics_title">Diagnosebericht</string>

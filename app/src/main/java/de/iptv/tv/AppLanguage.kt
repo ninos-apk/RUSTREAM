@@ -11,7 +11,7 @@ object AppLanguage {
     private const val KEY = "language"
     /** Language tag to its own name: a viewer who picked the wrong language still finds theirs. */
     val choices = listOf("de" to "Deutsch", "en" to "English")
-    const val DEFAULT = "de"
+    const val DEFAULT = "en"
 
     fun current(context: Context): String {
         val saved = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).getString(KEY, null)

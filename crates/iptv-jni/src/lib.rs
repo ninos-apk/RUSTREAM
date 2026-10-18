@@ -17,6 +17,7 @@ use std::{
 struct Registered {
     engine: Arc<Mutex<Engine>>,
     cancelled: Arc<AtomicBool>,
+    import_progress: Arc<AtomicI64>,
 }
 type Registry = HashMap<i64, Arc<Registered>>;
 static ENGINES: OnceLock<Mutex<Registry>> = OnceLock::new();
@@ -29,11 +30,13 @@ pub fn create() -> Result<i64, String> {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let engine = Engine::default();
     let cancelled = engine.cancelled.clone();
+    let import_progress = engine.import_progress.clone();
     engines().lock().map_err(|_| "bridge_unavailable")?.insert(
         id,
         Arc::new(Registered {
             engine: Arc::new(Mutex::new(engine)),
             cancelled,
+            import_progress,
         }),
     );
     Ok(id)
@@ -42,6 +45,27 @@ pub fn destroy(id: i64) {
     if let Ok(mut engines) = engines().lock() {
         engines.remove(&id);
     }
+}
+/// Read without taking the engine mutex held throughout parsing/index creation.
+pub fn import_progress(id: i64) -> i64 {
+    engines()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .get(&id)
+                .map(|engine| engine.import_progress.load(Ordering::Relaxed))
+        })
+        .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_de_iptv_tv_NativeBridge_nativeImportProgress(
+    _env: JNIEnv,
+    _class: JClass,
+    id: jlong,
+) -> jlong {
+    import_progress(id)
 }
 pub fn dispatch(id: i64, input: &str) -> String {
     let result = std::panic::catch_unwind(|| -> Result<serde_json::Value, String> {
@@ -116,6 +140,16 @@ pub extern "system" fn Java_de_iptv_tv_NativeBridge_nativeRequest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_remains_readable_while_import_owns_engine_lock() {
+        let id = create().unwrap();
+        let registered = engines().lock().unwrap().get(&id).unwrap().clone();
+        let _import = registered.engine.lock().unwrap();
+        registered.import_progress.store(430, Ordering::Relaxed);
+        assert_eq!(import_progress(id), 430);
+        destroy(id);
+        assert_eq!(import_progress(id), -1);
+    }
     #[test]
     fn invalid_closed_and_malformed_handles_are_errors() {
         let id = create().unwrap();

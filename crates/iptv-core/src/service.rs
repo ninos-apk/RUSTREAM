@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 use std::{
     fs::File,
     io::{BufRead, BufReader, Read},
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicI64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -171,6 +174,8 @@ pub struct Engine {
     /// Saved position for the current selection until recovery has observed its own.
     resume_hint: Option<f64>,
     pub cancelled: Arc<AtomicBool>,
+    /// -1: unknown; 0..999: parser permille; -2: finalizing; 1000: committed.
+    pub import_progress: Arc<AtomicI64>,
 }
 struct SearchResults {
     kind: Option<ContentKind>,
@@ -211,6 +216,7 @@ impl Default for Engine {
             catalog: None,
             resume_hint: None,
             cancelled: Arc::new(AtomicBool::new(false)),
+            import_progress: Arc::new(AtomicI64::new(-1)),
         }
     }
 }
@@ -247,6 +253,7 @@ impl Engine {
                 xtream,
                 salt,
             } => {
+                self.import_progress.store(-1, Ordering::Relaxed);
                 if std::path::Path::new(&target).exists() {
                     return Err("catalog_target_exists".into());
                 }
@@ -262,14 +269,22 @@ impl Engine {
                             .map(url::Url::parse)
                             .transpose()
                             .map_err(|_| "invalid_base")?;
-                        crate::catalog::build_m3u(&path, base.as_ref(), &mut writer)?
+                        crate::catalog::build_m3u_progress(
+                            &path,
+                            base.as_ref(),
+                            &mut writer,
+                            Some(self.import_progress.clone()),
+                        )?
                     };
+                    self.import_progress.store(-2, Ordering::Relaxed);
                     let catalog = writer.finish(summary.skipped)?;
+                    self.import_progress.store(1000, Ordering::Relaxed);
                     Ok(
                         json!({"schema":catalog.schema,"count":catalog.count,"skipped":catalog.skipped,"import_ms":started.elapsed().as_secs_f64()*1000.0}),
                     )
                 })();
                 if result.is_err() {
+                    self.import_progress.store(-1, Ordering::Relaxed);
                     let _ = std::fs::remove_file(&target);
                     let _ = std::fs::remove_file(format!("{target}-journal"));
                 }

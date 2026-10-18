@@ -39,6 +39,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -190,7 +192,11 @@ class MainActivity : ComponentActivity() {
             setContentView(TextView(this).apply { setText(R.string.core_missing); textSize = 24f; setPadding(48,48,48,48) }); return
         }
         buildUi()
-        loader.progress = { res -> scope.launch { if(busy) { val message=getString(res); status.text=message; startup.updateProgress(message) } } }
+        loader.progress = { state -> scope.launch { if(busy) {
+            val message=getString(state.message)
+            if(status.text.toString()!=message)status.text=message
+            startup.updateProgress(message,state)
+        } } }
         playback = PlaybackController(this, core, scope, video, { status.text = it }, { stats ->
             playerPane.hasSelection = selectedId != null
             playerPane.update(stats)
@@ -244,7 +250,10 @@ class MainActivity : ComponentActivity() {
         stage = FrameLayout(this).apply { setBackgroundColor(TvUi.background) }
         chrome = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),dp(10),dp(18),dp(6)) }
         toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; clipChildren = false }
-        toolbar.addView(label(getString(R.string.app_name).replace(" ","\n"),14f).apply { letterSpacing = 0.06f; setTypeface(typeface,android.graphics.Typeface.BOLD);contentDescription=getString(R.string.app_name) }, LinearLayout.LayoutParams(dp(if(largeText)190 else 120),-2))
+        toolbar.addView(ImageView(this).apply {
+            setImageResource(R.drawable.rustream_startup_logo); scaleType=ImageView.ScaleType.FIT_CENTER
+            contentDescription=getString(R.string.app_name); isFocusable=false
+        }, LinearLayout.LayoutParams(dp(56),dp(44)).apply { marginEnd=dp(12) })
         val tabs=LinearLayout(this)
         for ((key,title) in listOf("live" to R.string.tab_live,"movies" to R.string.tab_movies,"series" to R.string.tab_series,"unclassified" to R.string.tab_unclassified)) {
             val tab = button(getString(title)) { switchKind(key) }
@@ -332,11 +341,12 @@ class MainActivity : ComponentActivity() {
         playerSlot.addView(playerPane,FrameLayout.LayoutParams(-1,-1))
         mediaColumn.addView(playerSlot,LinearLayout.LayoutParams(-1,0,1f))
         status=label(getString(R.string.choose_channel),13f).apply {
+            id=View.generateViewId()
             maxLines=2; ellipsize=TextUtils.TruncateAt.END; setPadding(dp(6),dp(5),dp(6),dp(5))
             TvUi.focus(this,1f); setOnClickListener { showProgrammeDetails() }
         }
         mediaColumn.addView(status,LinearLayout.LayoutParams(-1,-2))
-        epg=label(getString(R.string.epg_hint),12f).apply { maxLines=2; setTextColor(TvUi.muted); ellipsize=TextUtils.TruncateAt.END }
+        epg=label(getString(R.string.epg_hint),12f).apply { id=View.generateViewId(); maxLines=2; setTextColor(TvUi.muted); ellipsize=TextUtils.TruncateAt.END }
         epg.setPadding(dp(6),dp(4),dp(6),dp(4))
         TvUi.focus(epg,1f); epg.setOnClickListener { showProgrammeDetails() }
         mediaColumn.addView(epg,LinearLayout.LayoutParams(-1,-2))
@@ -345,6 +355,18 @@ class MainActivity : ComponentActivity() {
         body.addView(mediaColumn,LinearLayout.LayoutParams(0,-1,1f))
         chrome.addView(body,LinearLayout.LayoutParams(-1,0,1f))
         details=ConnectionDetails(this) { playerAction("reconnect") }
+        // Explicit vertical paths keep the remote in the media column, independent of row lengths.
+        settingsButton.setOnKeyListener { _, key, event ->
+            if(key==KeyEvent.KEYCODE_DPAD_DOWN) {
+                if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0) {
+                    if(mediaColumn.isShown) { playerPane.hideControls(); video.requestFocus() } else channelSearch.requestFocus()
+                }
+                true
+            } else false
+        }
+        status.nextFocusUpId=video.id; status.nextFocusDownId=epg.id
+        epg.nextFocusUpId=status.id
+        details.setFocusAbove(epg)
         chrome.addView(details,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
         stage.addView(chrome,FrameLayout.LayoutParams(-1,-1))
         startup=StartupPane(this,::startLibrary) { settingsDialog() }
@@ -432,14 +454,47 @@ class MainActivity : ComponentActivity() {
     private fun appInfoDialog(){
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(20),dp(12),dp(20),dp(20))}
         content.addView(ImageView(this).apply{
-            setImageResource(R.drawable.rustream_logo);scaleType=ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.rustream_startup_logo);scaleType=ImageView.ScaleType.FIT_CENTER
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        },LinearLayout.LayoutParams(-1,dp(120)))
-        content.addView(label(getString(R.string.app_description),16f).apply{setLineSpacing(0f,1.25f);setPadding(0,dp(16),0,dp(12))})
-        content.addView(label(getString(R.string.app_version,BuildConfig.VERSION_NAME),12f).apply{setTextColor(TvUi.muted)})
-        content.addView(label(getString(R.string.app_developer),12f).apply{setTextColor(TvUi.muted);setPadding(0,dp(6),0,0)})
-        AlertDialog.Builder(this).setTitle(R.string.app_name).setView(ScrollView(this).apply{addView(content)})
-            .setPositiveButton(R.string.close){_,_->settingsButton.requestFocus()}.show()
+        },LinearLayout.LayoutParams(-1,dp(64)))
+        for(value in listOf(getString(R.string.about_version,BuildConfig.VERSION_NAME),getString(R.string.about_developer))) {
+            content.addView(label(value,14f).apply{setTypeface(typeface,android.graphics.Typeface.BOLD);setPadding(0,dp(6),0,0)})
+        }
+        fun paragraph(resource:Int,bold:Boolean=false) {
+            content.addView(label("",14f).apply {
+                text=getText(resource);setLineSpacing(0f,1.45f);setPadding(0,dp(14),0,0)
+                if(bold)setTypeface(typeface,android.graphics.Typeface.BOLD)
+            },LinearLayout.LayoutParams(-1,-2))
+        }
+        paragraph(R.string.about_intro)
+        paragraph(R.string.about_technology)
+        paragraph(R.string.about_independent)
+        paragraph(R.string.about_support_title,true)
+        paragraph(R.string.about_support_body)
+        content.addView(button(getString(R.string.about_paypal)) {
+            val email=getString(R.string.about_email)
+            try { startActivity(Intent(Intent.ACTION_SENDTO,android.net.Uri.parse("mailto:$email"))) }
+            catch(_:android.content.ActivityNotFoundException) {
+                AlertDialog.Builder(this).setTitle(email).setMessage(R.string.about_email_unavailable)
+                    .setPositiveButton(R.string.copy){_,_->
+                        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("PayPal",email))
+                    }.setNegativeButton(R.string.close,null).show()
+            }
+        },LinearLayout.LayoutParams(-2,-2).apply{topMargin=dp(12)})
+        paragraph(R.string.about_contribution)
+        paragraph(R.string.about_contact)
+        paragraph(R.string.about_thanks)
+        val scroll=ScrollView(this).apply {
+            isFocusable=true;descendantFocusability=ViewGroup.FOCUS_BEFORE_DESCENDANTS
+            addView(content)
+        }
+        val dialog=AlertDialog.Builder(this).setTitle(R.string.about_title).setView(scroll)
+            .setPositiveButton(R.string.close,null).create()
+        dialog.setOnDismissListener { if(startup.visibility==View.VISIBLE)startup.focusPrimary() else settingsButton.requestFocus() }
+        dialog.show()
+        dialog.window?.setLayout(dp(minOf(resources.configuration.screenWidthDp-48,680)),dp(resources.configuration.screenHeightDp-48))
+        scroll.requestFocus()
     }
     private fun bufferDialog() {
         val profiles = PlaybackBufferProfile.entries
@@ -826,6 +881,8 @@ class MainActivity : ComponentActivity() {
             }
             "fullscreen" -> setFullScreen(!fullScreen)
             "library" -> returnToChannels()
+            "settings" -> settingsButton.requestFocus()
+            "details" -> status.requestFocus()
             "statistics" -> details.refreshButton.takeIf { it.isEnabled }?.requestFocus() ?: status.requestFocus()
         }
     }
@@ -896,9 +953,11 @@ class MainActivity : ComponentActivity() {
         if (busy) return
         if(!preferCache)refreshWork?.cancel()
         busy = true
-        if (!libraryReady) startup.showLoading(getString(R.string.loading_source))
+        chrome.visibility=View.INVISIBLE
+        startup.showLoading(getString(R.string.loading_source))
         playerPane.cancelSeek()
         status.setText(R.string.importing_playlist)
+        var imported=false
         try {
             val cached=if(preferCache)try{loader.restore(source,core)}catch(error:Exception){
                 if(error is kotlinx.coroutines.CancellationException)throw error
@@ -919,7 +978,7 @@ class MainActivity : ComponentActivity() {
             channelRows.replace(emptyList())
             firstChannelFocus = true
             refreshCategories()
-            if (!libraryReady) catalogPending=true
+            catalogPending=true
             search()
             if (add) {
                 val updated = sources.toMutableList().apply { add(source) }
@@ -944,7 +1003,15 @@ class MainActivity : ComponentActivity() {
                 }
                 }
             }
-        } finally { busy = false; details.refreshButton.isEnabled=selectedId!=null }
+            imported=true
+        } finally {
+            busy = false; details.refreshButton.isEnabled=selectedId!=null
+            if(!imported) {
+                catalogPending=false
+                if(libraryReady) { startup.dismiss();chrome.visibility=View.VISIBLE }
+                else if(!currentCoroutineContext().isActive)startup.showEmpty()
+            }
+        }
     }
     private suspend fun refreshCategories() {
         val data = core.call("categories")
@@ -1169,13 +1236,13 @@ class MainActivity : ComponentActivity() {
             }.setNegativeButton(R.string.cancel, null).show()
     }
     private fun urlDialog(isEpg: Boolean) {
-        form(getString(if (isEpg) R.string.xmltv_address else R.string.playlist_address), listOf(getString(R.string.field_name), getString(R.string.field_url))) { values ->
+        form(getString(if (isEpg) R.string.xmltv_address else R.string.playlist_address), listOf(getString(R.string.field_name), getString(R.string.field_url)), foregroundImport=!isEpg) { values ->
             val source = JSONObject().put("kind", "url").put("name", values[0].ifBlank { if (isEpg) "EPG" else "Playlist" }).put("url", values[1])
             if (isEpg) importGuide(source) else importSource(source, true)
         }
     }
     private fun xtreamDialog() {
-        form(getString(R.string.xtream_title), listOf(getString(R.string.field_name), getString(R.string.field_server), getString(R.string.field_username), getString(R.string.field_password)), 3) { v ->
+        form(getString(R.string.xtream_title), listOf(getString(R.string.field_name), getString(R.string.field_server), getString(R.string.field_username), getString(R.string.field_password)), 3, foregroundImport=true) { v ->
             val source = JSONObject().put("kind", "xtream").put("name", v[0].ifBlank { "Xtream" }).put("server", v[1]).put("username", v[2]).put("password", v[3]).put("vod", true)
             importSource(source, true)
         }
@@ -1184,7 +1251,7 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this).setTitle(R.string.epg_title)
             .setItems(arrayOf(getString(R.string.epg_open_file), getString(R.string.epg_http_address))) { _, i -> if (i == 0) pickDocument(true) else urlDialog(true) }.setNegativeButton(R.string.cancel, null).show()
     }
-    private fun form(title: String, hints: List<String>, passwordIndex: Int = -1, submit: suspend (List<String>) -> Unit) {
+    private fun form(title: String, hints: List<String>, passwordIndex: Int = -1, foregroundImport:Boolean=false, submit: suspend (List<String>) -> Unit) {
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(8),dp(24),dp(8)) }
         val fields = hints.mapIndexed { i, hint -> EditText(this).apply {
             id=View.generateViewId();isSingleLine = true; textSize = 18f
@@ -1219,14 +1286,16 @@ class MainActivity : ComponentActivity() {
             }
             if(invalid>=0){fields[invalid].error=getString(if(invalid==1)R.string.field_invalid_url else R.string.field_required);fields[invalid].requestFocus();return@setOnClickListener}
             work=scope.launch {
+                if(foregroundImport)dialog.hide()
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
                 errorText.setText(R.string.source_checking);errorText.visibility=View.VISIBLE
                 try { submit(values);dialog.dismiss() }
                 catch(error:Exception){
-                    if(error is kotlinx.coroutines.CancellationException)throw error
+                    if(error is kotlinx.coroutines.CancellationException){dialog.dismiss();throw error}
                     val detail=ImportErrors.describe(error);lastFailure=detail.json()
                     val message=detail.message(this@MainActivity);errorText.text=message;status.text=message
                     if(!libraryReady)startup.showError(message)
+                    if(foregroundImport)dialog.show()
                 } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true }
             }
         }
@@ -1457,7 +1526,7 @@ class MainActivity : ComponentActivity() {
                 setBackgroundColor(TvUi.background)
                 root.addView(this,LinearLayout.LayoutParams(if(card)-1 else dp(28),dp(if(card)132 else 28)).apply{if(!card)marginEnd=dp(7)})
             }else null
-            val text=label("",if(card)12f else 10f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
+            val text=label("",if(card)12f else 11f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
             root.addView(text,LinearLayout.LayoutParams(if(card)-1 else 0,-2,if(card)0f else 1f))
             val metadata=if(card)label("",8f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
             // List rows (channels, episodes) end with progress text and the favourite star.

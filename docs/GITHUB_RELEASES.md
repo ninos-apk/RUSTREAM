@@ -68,7 +68,7 @@ The key remains outside Git. The workflow fails before building if the secret is
 
 ## Publish a development version
 
-1. Set `versionName` and an increasing `versionCode` in `app/build.gradle.kts`, then commit your changes. For the current source, these are `0.5.0` and `11`.
+1. Set `versionName` and an increasing `versionCode` in `app/build.gradle.kts`, then commit your changes. For the current source, these are `0.5.3` and `14`.
 2. Create an annotated tag whose name is `v` followed by that exact `versionName`.
 3. Push the source and tag:
 

@@ -234,7 +234,20 @@ class PlayerPane(
     fun handleKey(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_UP && event.keyCode == heldKey && heldKey != 0) { stopHeldSeek(); return true }
         if (event.action != KeyEvent.ACTION_DOWN || !hasFocus()) return false
-        if (controlsVisible && !video.hasFocus()) { touch(); return false }
+        if (controlsVisible && !video.hasFocus()) {
+            touch()
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    if (event.repeatCount == 0) hideControls()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (!isFullscreen && event.repeatCount == 0) { hideControls(); action("details") }
+                    return true
+                }
+            }
+            return false
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                 if (event.repeatCount == 0) {
@@ -243,7 +256,7 @@ class PlayerPane(
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> { if (event.repeatCount == 0) showControls(true); return true }
             KeyEvent.KEYCODE_DPAD_UP -> {
-                if (event.repeatCount == 0) { if (isFullscreen) showControls(true) else action("library") }; return true
+                if (event.repeatCount == 0) { if (isFullscreen) showControls(true) else { hideControls(); action("settings") } }; return true
             }
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!isFullscreen) { if (event.repeatCount == 0) { hideControls(); action(if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) "library" else "statistics") } }

@@ -3,6 +3,9 @@ package de.iptv.tv
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -25,16 +28,18 @@ import kotlin.coroutines.resumeWithException
 
 object BoundedCopy {
     const val LIMIT = 512L * 1024 * 1024
-    fun copy(input: InputStream, output: OutputStream, limit: Long = LIMIT, checkActive: () -> Unit = {}) : Long {
+    fun copy(input: InputStream, output: OutputStream, limit: Long = LIMIT, onProgress: (Long) -> Unit = {}, checkActive: () -> Unit = {}) : Long {
         val buffer = ByteArray(64 * 1024)
         var total = 0L
+        onProgress(0)
         while (true) {
             checkActive()
             val read = input.read(buffer)
-            if (read < 0) return total
+            if (read < 0) { onProgress(total); return total }
             total += read
             require(total <= limit) { "import_too_large" }
             output.write(buffer,0,read)
+            onProgress(total)
         }
     }
 }
@@ -45,7 +50,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
     private val catalogs by lazy { CatalogStore(context) }
     @Volatile var lastReport = JSONObject(); private set
     /** Receives a string resource, so the loader stays independent of the UI language. */
-    var progress: (Int) -> Unit = {}
+    var progress: (ImportProgress) -> Unit = {}
     suspend fun identity(source:JSONObject):String=withContext(Dispatchers.IO){catalogs.id(source)}
     suspend fun restore(source: JSONObject, core: Core): JSONObject? = withContext(Dispatchers.IO) {
         val started=System.nanoTime()
@@ -69,6 +74,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
         fun temp(): File = File.createTempFile("import-",".tmp",context.cacheDir).also { files += it }
         fun elapsed() = (System.nanoTime()-started)/1e6
         val coroutine = currentCoroutineContext()
+        // Background refresh and EPG work must not overwrite a foreground playlist's progress.
+        val notify: (ImportProgress) -> Unit = if(epg || !activate) ({ _ -> }) else progress
         try {
             val temporary = temp()
             var base: String? = null
@@ -77,17 +84,18 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
             val previous = if(epg) null else catalogs.entry(source)
             when(source.getString("kind")) {
                 "file" -> {
-                    stage = "copy_file"; progress(R.string.progress_reading_file)
+                    stage = "copy_file"; notify(ImportProgress(R.string.progress_reading_file))
                     val before = elapsed()
                     validators=fileSignature(source)
                     val input=context.contentResolver.openInputStream(Uri.parse(source.getString("uri"))) ?: throw ImportFailure("file_not_found",stage)
-                    input.use { from -> temporary.outputStream().use { to -> report.put("bytes",BoundedCopy.copy(from,to,if(epg)128L*1024*1024 else BoundedCopy.LIMIT){coroutine.ensureActive()}) } }
+                    val total=validators.optLong("size",validators.optLong(android.provider.OpenableColumns.SIZE,-1)).takeIf { it>=0 }
+                    input.use { from -> temporary.outputStream().use { to -> report.put("bytes",BoundedCopy.copy(from,to,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,transferProgress(R.string.progress_reading_file,total,notify)){coroutine.ensureActive()}) } }
                     report.put("copy_ms",elapsed()-before)
                 }
                 "url" -> {
-                    stage = "download"; progress(R.string.progress_downloading)
+                    stage = "download"; notify(ImportProgress(R.string.progress_downloading))
                     val before=elapsed()
-                    val downloaded=fetch(source.getString("url"),temporary,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,previous?.takeIf{it.optInt("schema")==CatalogStore.SCHEMA}?.optJSONObject("validators"))
+                    val downloaded=fetch(source.getString("url"),temporary,if(epg)128L*1024*1024 else BoundedCopy.LIMIT,previous?.takeIf{it.optInt("schema")==CatalogStore.SCHEMA}?.optJSONObject("validators"),R.string.progress_downloading,notify)
                     if(downloaded.optBoolean("not_modified")) {
                         val restored=if(activate)restore(source,core) ?: throw ImportFailure("catalog_invalid","restore") else JSONObject().put("unchanged",true)
                         report.put("not_modified",true).put("total_ms",elapsed())
@@ -100,7 +108,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                     report.put("download_ms",elapsed()-before).put("bytes",temporary.length())
                 }
                 "xtream" -> {
-                    stage="xtream_account"; progress(R.string.progress_checking_login)
+                    stage="xtream_account"; var transferMessage=R.string.progress_checking_login
+                    notify(ImportProgress(transferMessage))
                     val server=server(source)
                     var remaining=BoundedCopy.LIMIT
                     suspend fun api(action:String?,limit:Long=remaining):File {
@@ -109,7 +118,11 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                             .addQueryParameter("username",source.getString("username")).addQueryParameter("password",source.getString("password"))
                         if(action!=null)url.addQueryParameter("action",action)
                         val out=temp()
-                        fetch(url.build().toString(),out,minOf(remaining,limit)); remaining-=out.length()
+                        val transferred=BoundedCopy.LIMIT-remaining
+                        // Xtream spans several responses; no single response is its overall total.
+                        fetch(url.build().toString(),out,minOf(remaining,limit),message=transferMessage,
+                            notify={ state -> notify(state.copy(completed=transferred+state.completed,total=null)) })
+                        remaining-=out.length()
                         return out
                     }
                     val account=JSONObject(api(null,1024*1024).readText())
@@ -124,7 +137,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                         Triple("movies","get_vod_categories","get_vod_streams"),
                         Triple("series","get_series_categories","get_series"))) {
                         if(field=="movies"&&!source.optBoolean("vod",true))continue
-                        stage="xtream_$field";progress(when(field){"live"->R.string.progress_live_catalog;"movies"->R.string.progress_movie_catalog;else->R.string.progress_series_catalog})
+                        stage="xtream_$field";transferMessage=when(field){"live"->R.string.progress_live_catalog;"movies"->R.string.progress_movie_catalog;else->R.string.progress_series_catalog}
+                        notify(ImportProgress(transferMessage))
                         try {
                             val categories=api(categoryAction,8L*1024*1024)
                             val streams=api(streamAction)
@@ -142,7 +156,7 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 else -> throw ImportFailure("invalid_source",stage)
             }
             coroutine.ensureActive()
-            stage="parse_catalog";progress(R.string.progress_parsing)
+            stage="parse_catalog";notify(ImportProgress(R.string.progress_parsing))
             val result:JSONObject
             if(epg) {
                 result=core.call("epg_import","path" to temporary.absolutePath)
@@ -150,10 +164,23 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 val file=catalogs.newFile();target=file
                 val key=catalogs.newKey()
                 val salt=catalogs.salt(source)
-                val parsed=Core().use { worker -> worker.call("build_catalog","path" to temporary.absolutePath,"base" to base,
-                    "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream"),"salt" to salt) }
+                val parsed=Core().use { worker -> coroutineScope {
+                    val parsing=async { worker.call("build_catalog","path" to temporary.absolutePath,"base" to base,
+                        "target" to file.absolutePath,"key" to key,"xtream" to (source.getString("kind")=="xtream"),"salt" to salt) }
+                    var previousProgress=Long.MIN_VALUE
+                    while(!parsing.isCompleted) {
+                        val value=worker.importProgress()
+                        if(value!=previousProgress) {
+                            if(value in 0L..999L)notify(ImportProgress(R.string.progress_parsing,value,1000))
+                            else if(value == -2L)notify(ImportProgress(R.string.progress_finalizing))
+                            previousProgress=value
+                        }
+                        delay(100)
+                    }
+                    parsing.await()
+                } }
                 report.put("parse_ms",parsed.getDouble("import_ms"))
-                stage="commit_catalog";progress(R.string.progress_opening)
+                stage="commit_catalog";notify(ImportProgress(R.string.progress_opening))
                 check(parsed.getInt("schema")==CatalogStore.SCHEMA){"catalog_incompatible"}
                 Core().use { checkCore -> checkCore.call("open_catalog","path" to file.absolutePath,"key" to key) }
                 catalogs.commit(source,file,key,validators,warnings.length()>0,warnings,parsed.getInt("schema"),salt)
@@ -209,7 +236,16 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
             core.call("resolve_series","revision" to revision,"id" to id,"path" to temporary.absolutePath)
         }finally{temporary.delete()}
     }
-    private suspend fun fetch(url:String,file:File,limit:Long,validators:JSONObject?=null):JSONObject {
+    private fun transferProgress(message:Int,total:Long?,notify:(ImportProgress)->Unit): (Long)->Unit {
+        var last=0L
+        return { completed ->
+            val now=System.nanoTime()
+            if(completed==0L || completed==total || now-last>=100_000_000) {
+                last=now;notify(ImportProgress(message,completed,total,true))
+            }
+        }
+    }
+    private suspend fun fetch(url:String,file:File,limit:Long,validators:JSONObject?=null,message:Int=R.string.progress_downloading,notify:(ImportProgress)->Unit={}):JSONObject {
         val address=url.toHttpUrl()
         require(address.username.isEmpty()&&address.password.isEmpty()){ "use_query_credentials" }
         val request=Request.Builder().url(address)
@@ -228,7 +264,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                                 if(!reply.isSuccessful)throw ImportFailure("http_${reply.code}","download",reply.code)
                                 val body=reply.body ?: throw ImportFailure("empty_response","download")
                                 require(body.contentLength()<=limit){"import_too_large"}
-                                body.byteStream().use { from -> file.outputStream().use { to -> BoundedCopy.copy(from,to,limit){if(!continuation.isActive)throw kotlinx.coroutines.CancellationException()} } }
+                                val total=body.contentLength().takeIf { it>=0 }
+                                body.byteStream().use { from -> file.outputStream().use { to -> BoundedCopy.copy(from,to,limit,transferProgress(message,total,notify)){if(!continuation.isActive)throw kotlinx.coroutines.CancellationException()} } }
                                 JSONObject().put("final_url",reply.request.url.toString()).put("validators",JSONObject()
                                     .put("etag",reply.header("ETag")?:"").put("last_modified",reply.header("Last-Modified")?:""))
                             }

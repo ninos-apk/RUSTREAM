@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicI64, Ordering},
 };
 use std::{
     collections::HashMap,
@@ -1130,11 +1130,64 @@ pub fn build_m3u(
     base: Option<&url::Url>,
     writer: &mut Writer,
 ) -> Result<ParseSummary, String> {
+    build_m3u_progress(path, base, writer, None)
+}
+
+/// Progress follows bytes consumed by the parser, not BufReader's read-ahead.
+struct ProgressReader<R> {
+    inner: R,
+    consumed: u64,
+    total: u64,
+    progress: Option<Arc<AtomicI64>>,
+}
+impl<R> ProgressReader<R> {
+    fn advance(&mut self, count: usize) {
+        self.consumed += count as u64;
+        if let Some(progress) = &self.progress {
+            progress.store(
+                ((self.consumed.saturating_mul(1000) / self.total.max(1)).min(999)) as i64,
+                Ordering::Relaxed,
+            );
+        }
+    }
+}
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(bytes)?;
+        self.advance(count);
+        Ok(count)
+    }
+}
+impl<R: BufRead> BufRead for ProgressReader<R> {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        self.inner.fill_buf()
+    }
+    fn consume(&mut self, count: usize) {
+        self.inner.consume(count);
+        self.advance(count);
+    }
+}
+
+pub fn build_m3u_progress(
+    path: &str,
+    base: Option<&url::Url>,
+    writer: &mut Writer,
+    progress: Option<Arc<AtomicI64>>,
+) -> Result<ParseSummary, String> {
     let file = File::open(path).map_err(|e| io_code(&e))?;
-    if file.metadata().map_err(|e| io_code(&e))?.len() > BYTE_LIMIT {
+    let total = file.metadata().map_err(|e| io_code(&e))?.len();
+    if total > BYTE_LIMIT {
         return Err("import_too_large".into());
     }
-    let mut input = BufReader::with_capacity(256 * 1024, file.take(BYTE_LIMIT + 1));
+    if let Some(progress) = &progress {
+        progress.store(0, Ordering::Relaxed);
+    }
+    let mut input = ProgressReader {
+        inner: BufReader::with_capacity(256 * 1024, file.take(BYTE_LIMIT + 1)),
+        consumed: 0,
+        total,
+        progress: progress.clone(),
+    };
     let prefix = String::from_utf8_lossy(input.fill_buf().map_err(|e| io_code(&e))?).into_owned();
     if prefix
         .lines()
@@ -1199,6 +1252,25 @@ pub fn build_m3u(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_counts_consumption_not_buffer_read_ahead() {
+        let progress = Arc::new(AtomicI64::new(0));
+        let mut reader = ProgressReader {
+            inner: BufReader::new(io::Cursor::new(vec![1u8; 1000])),
+            consumed: 0,
+            total: 1000,
+            progress: Some(progress.clone()),
+        };
+        assert_eq!(reader.fill_buf().unwrap().len(), 1000);
+        assert_eq!(progress.load(Ordering::Relaxed), 0);
+        reader.consume(250);
+        assert_eq!(progress.load(Ordering::Relaxed), 250);
+        let mut rest = Vec::new();
+        reader.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest.len(), 750);
+        // Index creation/commit still remain after the input is consumed.
+        assert_eq!(progress.load(Ordering::Relaxed), 999);
+    }
 
     fn writer(name: &str) -> (std::path::PathBuf, Writer) {
         let path = std::env::temp_dir().join(format!("catalog-{name}-{}.db", std::process::id()));
