@@ -207,6 +207,13 @@
     <string name="buffer_sport">Sport · 1 s / 16 MiB</string>
     <string name="buffer_balanced">Balanced · 3 s / 32 MiB</string>
     <string name="buffer_stable">Stable · 6 s / 64 MiB</string>
+    <string name="buffer_custom">Custom …</string>
+    <string name="buffer_custom_selected">Custom · %1$d s</string>
+    <string name="buffer_custom_title">Custom live buffer · from the next connection</string>
+    <string name="buffer_custom_10">10 s / 60 MB</string>
+    <string name="buffer_custom_15">15 s / 90 MB</string>
+    <string name="buffer_custom_20">20 s / 120 MB</string>
+    <string name="buffer_back">Back</string>
     <string name="history_title">“Recently watched” · entries per section</string>
     <string name="language_title">Language · Sprache</string>
 
@@ -260,6 +267,9 @@
     <!-- Diagnostics -->
     <string name="diagnostics_title">Diagnostic report</string>
     <string name="diagnostics_clip">IPTV diagnostics</string>
+    <string name="diagnostics_text">Diagnostic report · text</string>
+    <string name="diagnostics_scroll_hint">↑ and ↓ to scroll · → for actions · Back to close</string>
+    <string name="diagnostics_copied">Diagnostic report copied</string>
     <string name="exit_low_memory">Android closed the app because memory was low</string>
     <string name="exit_native_crash">Native crash</string>
     <string name="exit_anr">The app was not responding</string>

@@ -209,6 +209,7 @@ class PlaybackController(
         val loadControl = DefaultLoadControl.Builder().setAllocator(mediaAllocator)
             .setBufferDurationsMs(buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs)
             .setTargetBufferBytes(buffers.bytes)
+            // The byte budget may stop read-ahead before the time target on high-bitrate streams.
             .setPrioritizeTimeOverSizeThresholds(false).build()
         val p = ExoPlayer.Builder(context).setMediaSourceFactory(media).setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)

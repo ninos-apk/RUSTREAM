@@ -211,6 +211,13 @@
     <string name="buffer_sport">Sport · 1 s / 16 MiB</string>
     <string name="buffer_balanced">Ausgewogen · 3 s / 32 MiB</string>
     <string name="buffer_stable">Stabil · 6 s / 64 MiB</string>
+    <string name="buffer_custom">Benutzerdefiniert …</string>
+    <string name="buffer_custom_selected">Benutzerdefiniert · %1$d s</string>
+    <string name="buffer_custom_title">Live-Puffer anpassen · ab nächster Verbindung</string>
+    <string name="buffer_custom_10">10 s / 60 MB</string>
+    <string name="buffer_custom_15">15 s / 90 MB</string>
+    <string name="buffer_custom_20">20 s / 120 MB</string>
+    <string name="buffer_back">Zurück</string>
     <string name="history_title">„Zuletzt gesehen“ · Einträge je Bereich</string>
     <string name="language_title">Sprache · Language</string>
 
@@ -264,6 +271,9 @@
     <!-- Diagnostics -->
     <string name="diagnostics_title">Diagnosebericht</string>
     <string name="diagnostics_clip">IPTV Diagnose</string>
+    <string name="diagnostics_text">Diagnosebericht · Text</string>
+    <string name="diagnostics_scroll_hint">Mit ↑ und ↓ scrollen · Mit → zu den Aktionen · Zurück zum Schließen</string>
+    <string name="diagnostics_copied">Diagnosebericht kopiert</string>
     <string name="exit_low_memory">Android hat die App wegen Arbeitsspeicherdruck beendet</string>
     <string name="exit_native_crash">Nativer Absturz</string>
     <string name="exit_anr">Die App reagierte nicht</string>

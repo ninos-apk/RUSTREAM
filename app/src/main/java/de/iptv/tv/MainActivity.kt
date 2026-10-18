@@ -522,13 +522,32 @@ class MainActivity : ComponentActivity() {
         scroll.requestFocus()
     }
     private fun bufferDialog() {
-        val profiles = PlaybackBufferProfile.entries
+        val profiles = PlaybackBufferProfile.entries.filterNot { it.custom }
+        val current = playback.bufferProfile
+        val customLabel = if (current.custom) getString(R.string.buffer_custom_selected, current.targetMs / 1_000)
+            else getString(R.string.buffer_custom)
         AlertDialog.Builder(this).setTitle(R.string.buffer_title)
-            .setSingleChoiceItems(profiles.map { getString(it.label) }.toTypedArray(), profiles.indexOf(playback.bufferProfile)) { dialog, index ->
-                playback.bufferProfile = profiles[index]
-                getPreferences(MODE_PRIVATE).edit().putString("liveBufferProfile", profiles[index].key).apply()
+            .setSingleChoiceItems((profiles.map { getString(it.label) } + customLabel).toTypedArray(),
+                if (current.custom) profiles.size else profiles.indexOf(current)) { dialog, index ->
                 dialog.dismiss()
+                if (index == profiles.size) customBufferDialog() else saveBufferProfile(profiles[index])
             }.setNegativeButton(R.string.close, null).show()
+    }
+    private fun customBufferDialog() {
+        val profiles = PlaybackBufferProfile.entries.filter { it.custom }
+        AlertDialog.Builder(this).setTitle(R.string.buffer_custom_title)
+            .setSingleChoiceItems(profiles.map { getString(it.label) }.toTypedArray(), profiles.indexOf(playback.bufferProfile)) { dialog, index ->
+                saveBufferProfile(profiles[index])
+                dialog.dismiss()
+            }.setNegativeButton(R.string.buffer_back) { _, _ -> bufferDialog() }
+            .create().apply {
+                setOnCancelListener { bufferDialog() }
+                show()
+            }
+    }
+    private fun saveBufferProfile(profile: PlaybackBufferProfile) {
+        playback.bufferProfile = profile
+        getPreferences(MODE_PRIVATE).edit().putString("liveBufferProfile", profile.key).apply()
     }
     private fun historyDialog() {
         val choices=UserLibrary.LIMIT_CHOICES
@@ -1442,7 +1461,9 @@ class MainActivity : ComponentActivity() {
         return super.onKeyDown(keyCode, event)
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun diagnosticsDialog(){launchSafe {
+    private fun diagnosticsDialog(){
+        val returnFocus=currentFocus ?: settingsButton
+        launchSafe {
         val report=JSONObject().put("app_version",BuildConfig.VERSION_NAME).put("version_code",BuildConfig.VERSION_CODE)
             .put("build_id",BuildConfig.CORE_BUILD_ID)
             .put("core",core.call("info")).put("import",loader.lastReport).put("last_error",lastFailure?:JSONObject.NULL)
@@ -1454,11 +1475,7 @@ class MainActivity : ComponentActivity() {
             if(exit!=null)report.put("previous_exit",JSONObject().put("reason",exit.reason).put("time",exit.timestamp)
                 .put("meaning",when(exit.reason){android.app.ApplicationExitInfo.REASON_LOW_MEMORY->getString(R.string.exit_low_memory);android.app.ApplicationExitInfo.REASON_CRASH_NATIVE->getString(R.string.exit_native_crash);android.app.ApplicationExitInfo.REASON_ANR->getString(R.string.exit_anr);android.app.ApplicationExitInfo.REASON_CRASH->getString(R.string.exit_crash);else->getString(R.string.exit_other)}))
         }else report.put("previous_exit",getString(R.string.exit_unavailable))
-        val text=report.toString(2)
-        val content=TextView(this@MainActivity).apply{textSize=13f;setTextIsSelectable(true);setPadding(dp(20),dp(10),dp(20),dp(10));this.text=text}
-        AlertDialog.Builder(this@MainActivity).setTitle(R.string.diagnostics_title).setView(android.widget.ScrollView(this@MainActivity).apply{addView(content)})
-            .setPositiveButton(R.string.copy){_,_->(getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText(getString(R.string.diagnostics_clip),text))}
-            .setNegativeButton(R.string.close,null).show()
+        DiagnosticsDialog(this@MainActivity,report.toString(2),returnFocus).show()
     }}
     private fun searchField(hint: String, changed: () -> Unit) = EditText(this).apply {
         id=View.generateViewId(); this.hint = hint; contentDescription = hint; isSingleLine = true; textSize = 12f
