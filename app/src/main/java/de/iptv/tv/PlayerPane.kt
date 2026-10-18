@@ -74,6 +74,7 @@ class PlayerPane(
     }.apply { visibility = View.GONE; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
     val previewFocusVisible get() = outline.visibility == View.VISIBLE
     val buttons = linkedMapOf<String, TvIconButton>()
+    private val controlColumns = linkedMapOf<String, LinearLayout>()
     private var hideWork: Job? = null
     private var feedbackWork: Job? = null
     private var seekWork: Job? = null
@@ -102,27 +103,39 @@ class PlayerPane(
         timeline.addView(time, LinearLayout.LayoutParams(-2, -2))
         timeline.addView(progress, LinearLayout.LayoutParams(0, dp(3), 1f).apply { marginStart = dp(12) })
         overlay.addView(timeline)
-        val controls = LinearLayout(context).apply { gravity = Gravity.CENTER; clipChildren = false; clipToPadding = false }
+        val controls = object : LinearLayout(context) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val count = controlColumns.values.count { it.visibility == View.VISIBLE }.coerceAtLeast(1)
+                val available = MeasureSpec.getSize(widthMeasureSpec)
+                val buttonWidth = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) dp(44)
+                    else minOf(dp(44), (available / count - dp(4)).coerceAtLeast(1))
+                buttons.values.forEach { button ->
+                    if (button.layoutParams.width != buttonWidth) button.layoutParams = button.layoutParams.apply { width = buttonWidth }
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }.apply { gravity = Gravity.CENTER; clipChildren = false; clipToPadding = false }
         for ((key, symbol, label) in listOf(
+            Triple("previous_episode", "previous_episode", R.string.player_previous_episode),
             Triple("back", "back", R.string.player_back_30), Triple("play", "play", R.string.player_play),
-            Triple("forward", "forward", R.string.player_forward_30), Triple("stop", "stop", R.string.player_stop), Triple("fullscreen", "fullscreen", R.string.player_fullscreen),
+            Triple("forward", "forward", R.string.player_forward_30),
+            Triple("next_episode", "next_episode", R.string.player_next_episode),
+            Triple("stop", "stop", R.string.player_stop), Triple("fullscreen", "fullscreen", R.string.player_fullscreen),
             Triple("favorite", "star", R.string.favorite_add)
         )) {
             val button = TvIconButton(context, symbol, context.getString(label)) { touch(); cancelSeek(); action(key) }.apply { id = View.generateViewId() }
             TvUi.focus(button, 1f) { focused -> if (focused) { caption.text = button.contentDescription; touch() } }
             buttons[key] = button
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            controlColumns[key] = column
             // The ±30 icons carry their number; extra labels pushed them above the other buttons.
             column.addView(button, LinearLayout.LayoutParams(dp(44), dp(42)))
             controls.addView(column, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(2), dp(4), dp(2), dp(4)) })
         }
-        val ordered = buttons.values.toList()
-        ordered.forEachIndexed { i, button ->
-            button.nextFocusLeftId = ordered.getOrNull(i - 1)?.id ?: button.id
-            button.nextFocusRightId = ordered.getOrNull(i + 1)?.id ?: button.id
+        buttons.values.forEach { button ->
             button.nextFocusUpId = video.id; button.nextFocusDownId = button.id
             button.setOnKeyListener { _, key, event ->
-                if (button === buttons.values.firstOrNull { it.isEnabled && it.isFocusable } && !isFullscreen && key == KeyEvent.KEYCODE_DPAD_LEFT && event.action == KeyEvent.ACTION_DOWN) {
+                if (button === buttons.values.firstOrNull { it.visibility == View.VISIBLE && it.isEnabled && it.isFocusable } && !isFullscreen && key == KeyEvent.KEYCODE_DPAD_LEFT && event.action == KeyEvent.ACTION_DOWN) {
                     if (event.repeatCount == 0) { hideControls(); action("library") }; true
                 } else false
             }
@@ -133,6 +146,28 @@ class PlayerPane(
         addView(focusHint, LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
         addView(outline, LayoutParams(-1, -1))
         video.setOnClickListener { if (isFullscreen) showControls(true) else if (hasSelection) action("fullscreen") else action("library") }
+        setEpisodeNavigation(false)
+    }
+    /** Controls follow the playing episode, independent of the currently browsed library. */
+    fun setEpisodeNavigation(visible: Boolean, previous: Boolean = false, next: Boolean = false) {
+        var restoreFocus = false
+        for ((key, available) in listOf("previous_episode" to previous, "next_episode" to next)) {
+            buttons.getValue(key).apply {
+                if (hasFocus() && (!visible || !available)) restoreFocus = true
+                visibility = if (visible) View.VISIBLE else View.GONE
+                isEnabled = visible && available; isFocusable = isEnabled
+            }
+            controlColumns.getValue(key).visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        updateControlFocus()
+        if (restoreFocus) buttons.getValue("play").requestFocus()
+    }
+    private fun updateControlFocus() {
+        val ordered = buttons.values.filter { it.visibility == View.VISIBLE && it.isEnabled && it.isFocusable }
+        ordered.forEachIndexed { index, button ->
+            button.nextFocusLeftId = ordered.getOrNull(index - 1)?.id ?: button.id
+            button.nextFocusRightId = ordered.getOrNull(index + 1)?.id ?: button.id
+        }
     }
     /** Shows the favourite state of what is playing (for an episode: its show). */
     fun setFavorite(active: Boolean?) {
@@ -145,6 +180,7 @@ class PlayerPane(
             isEnabled = available; isFocusable = available
             if (hasFocus()) caption.text = contentDescription
         }
+        updateControlFocus()
     }
     fun updateInformation(status: String, guide: String = guideText) {
         statusText = status; guideText = guide; updateInfo()
@@ -171,6 +207,7 @@ class PlayerPane(
         for (key in listOf("back", "forward")) buttons.getValue(key).apply { isEnabled = stats.seekable; isFocusable = stats.seekable }
         buttons.getValue("favorite").apply { val available = hasSelection && favorite != null; isEnabled = available; isFocusable = available }
         if (buttons.values.any { !it.isEnabled && it.hasFocus() }) play.requestFocus()
+        updateControlFocus()
         if (seeking && (!stats.seekable || stats.live || !hasSelection)) cancelSeek()
         if (!seeking) updateTimeline(stats.positionMs)
         if (controlsVisible && stats.playing && hideWork == null) scheduleHide()

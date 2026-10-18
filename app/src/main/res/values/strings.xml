@@ -38,6 +38,9 @@
     <string name="categories_list">Kategorienliste</string>
     <string name="entries_list">Eintragsliste</string>
     <string name="episodes_list">Episodenliste</string>
+    <string name="episodes_heading">Episoden</string>
+    <string name="episodes_scroll_more">Weitere ↓</string>
+    <string name="episodes_scroll_previous">Vorherige ↑</string>
     <string name="series_library">Serienbibliothek</string>
     <string name="movie_library">Filmbibliothek</string>
     <string name="search_categories">Kategorie suchen</string>
@@ -141,6 +144,8 @@
     <string name="player_focus_hint">OK: Vollbild  ·  ↓ Steuerung</string>
     <string name="player_back_30">30 Sekunden zurück</string>
     <string name="player_forward_30">30 Sekunden vor</string>
+    <string name="player_previous_episode">Vorherige Episode</string>
+    <string name="player_next_episode">Nächste Episode</string>
     <string name="player_play">Wiedergabe starten</string>
     <string name="player_pause">Pause</string>
     <string name="player_stop">Stopp</string>

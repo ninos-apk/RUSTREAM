@@ -190,7 +190,7 @@ class UserLibraryUiTest {
                         device.pressBack()
                         click("Series (1)")
                         pressCard("Demo Show")
-                        assertTrue(device.wait(Until.hasObject(By.textStartsWith("▶ Fortsetzen · S1 · E2")),10_000))
+                        assertTrue(device.wait(Until.hasObject(By.descStartsWith("▶ Fortsetzen · S01 E02")),10_000))
                         device.executeShellCommand("screencap -p /sdcard/Download/user-library-series-resume.png")
                         click("← Serienbibliothek")
                         pressCard("★ Favoriten (1)")

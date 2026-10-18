@@ -1,5 +1,7 @@
 # RUSTREAM IPTV PLAYER – Android TV / Google TV
 
+**Version 0.5.4 (18. Oktober 2026):** Kompakter Serienkopf mit separater Fortsetzen- und Fortschrittsanzeige, fester Staffelwahl und übersichtlichen Episodenzeilen ohne wiederholte Cover. Lange Titel, doppelte Systemschrift und eine gespiegelte Serienansicht werden berücksichtigt. Im Serienplayer wechseln zwei neue Buttons zur vorherigen bzw. nächsten Episode innerhalb der aktuellen Staffel, in Vorschau und Vollbild; bei Filmen und Live-TV bleiben sie verborgen. Bestehende Farben und Funktionen bleiben erhalten. Umsetzung und Prüfnachweise: [Serienlayout](docs/SERIES_LAYOUT.md), [Episodenwechsel im Player](docs/SERIES_PLAYER_CONTROLS.md). Das Release-Tag ist `v0.5.4`; die GitHub-Automation veröffentlicht nach erfolgreichen Prüfungen eine Development-Prerelease-APK.
+
 RUSTREAM IPTV PLAYER ist ein IPTV-Player mit einem in Rust entwickelten Core. Der Fokus liegt auf hoher Performance und einem flüssigen Streaming-Erlebnis – besonders bei Live-Sport und Fußball.
 
 **Version 0.5.3 (18. Oktober 2026):** Verbesserte D-Pad-Navigation zwischen Player, Einstellungen, Programmdetails und Refresh; kompakter Refresh-Button rechts in der Statistikzeile; Statistikwerte ohne Fokusstopps. Kategorien und Sendernamen nutzen 11sp, Film-/Serienmetadaten bleiben bei 8sp. Neue Installationen starten auf English. Transparente Logos und überarbeitete App-Info mit Entwicklerkontakt ergänzen den Ladebildschirm mit echtem Importfortschritt. Umsetzung und Prüfnachweise: [UI und Navigation](docs/UI_NAVIGATION_052.md), [Importfortschritt](docs/IMPORT_PROGRESS_052.md). Das Release-Tag ist `v0.5.3`; die GitHub-Automation veröffentlicht die APK als Development-Prerelease.
@@ -34,7 +36,7 @@ adb shell am start -n de.iptv.tv/.MainActivity
 
 Ausgaben: `artifacts/RUSTREAM-IPTV-debug.apk` (installierbar und mit Debug-Key signiert), `app/build/outputs/apk/release/app-release-unsigned.apk` und `artifacts/RUSTREAM-IPTV-release-unsigned.aab`. Release-Dateien benötigen vor Distribution einen eigenen Signierschlüssel. Das Projekt veröffentlicht nichts im Store. Die bisherigen `iptv-tv-*`-Dateinamen bleiben als Kompatibilitätskopien vorhanden.
 
-Für die lokale Abnahme liegt `artifacts/RUSTREAM-IPTV-PLAYER-0.5.3.apk` bereit: die R8-optimierte APK mit der bestehenden Development-Testsignatur. Die GitHub-Automation baut und prüft das Tag erneut, bevor sie die versionierte APK und ihre SHA-256-Prüfsumme veröffentlicht.
+Die GitHub-Automation baut und prüft `v0.5.4` und veröffentlicht die R8-optimierte `RUSTREAM-IPTV-PLAYER-0.5.4.apk` mit der bestehenden Development-Testsignatur und SHA-256-Prüfsumme als Development-Prerelease. Lokale Prüfnachweise der Serienansicht und Episodensteuerung stehen in den oben verlinkten Berichten.
 
 Android TV/Google TV ab Android 6 / API 23; ARM64, ARMv7 und x86_64. Ältere Android-TV-Versionen liegen außerhalb des Minimums der verwendeten Media3-Version. Keine Bindung an TCL oder einen bestimmten SoC. Tatsächliche 4K-/HDR-/Codec-Unterstützung hängt vom Decoder des Geräts ab.
 

@@ -179,6 +179,13 @@ class TvIconButton(context: Context, var symbol: String, description: String, ac
             "play" -> { paint.style = Paint.Style.FILL; canvas.drawPath(iconPath.apply { reset(); moveTo(7f,4f); lineTo(20f,12f); lineTo(7f,20f); close() },paint) }
             "pause" -> { paint.style = Paint.Style.FILL; canvas.drawRoundRect(6f,4f,10f,20f,1f,1f,paint); canvas.drawRoundRect(14f,4f,18f,20f,1f,1f,paint) }
             "stop" -> { paint.style = Paint.Style.FILL; canvas.drawRoundRect(5f,5f,19f,19f,2f,2f,paint) }
+            "previous_episode", "next_episode" -> {
+                if (symbol == "next_episode") { canvas.save(); canvas.scale(-1f,1f,12f,12f) }
+                paint.style = Paint.Style.FILL
+                canvas.drawRect(5f,5f,7f,19f,paint)
+                canvas.drawPath(iconPath.apply { reset(); moveTo(8f,12f); lineTo(18f,5f); lineTo(18f,19f); close() },paint)
+                if (symbol == "next_episode") canvas.restore()
+            }
             "back", "forward" -> {
                 // Circular arrow opening at the top, the filled head turning into the gap.
                 // Forward mirrors the arrow only; the number stays upright and centred.
