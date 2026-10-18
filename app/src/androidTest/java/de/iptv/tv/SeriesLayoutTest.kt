@@ -8,6 +8,8 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.core.view.descendants
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -48,7 +50,8 @@ class SeriesLayoutTest {
                 // 320 physical px is deliberately narrower than the standard TV panel.
                 for((name,scale,rtl,narrow) in listOf(
                     Case("english",1f,false,false),Case("german",1f,false,false),
-                    Case("rtl",1f,true,false),Case("double-text",2f,false,false),Case("narrow-320px",1f,false,true)
+                    Case("rtl",1f,true,false),Case("double-text",2f,false,false),Case("narrow-320px",1f,false,true),
+                    Case("rtl-double-text",2f,true,false),Case("narrow-double-text",2f,false,true)
                 )){
                     AppLanguage.save(context,if(name=="english")"en" else "de")
                     device.executeShellCommand("settings put system font_scale $scale")
@@ -83,7 +86,10 @@ class SeriesLayoutTest {
                             library.updateProgress(source,episodeKey,49.0,2446.0,false)
                             assertTrue(list.getChildAt(0).requestFocus())
                         }
-                        waitFor("Resume action appears"){(field(it,"seriesResume") as View).isShown}
+                        waitFor("Paused episode is highlighted with its saved time"){activity->
+                            val first=(field(activity,"channels") as RecyclerView).getChildAt(0) as? ViewGroup
+                            first?.isActivated==true&&first.descendants.filterIsInstance<TextView>().any{it.text=="0:49"&&it.isShown}
+                        }
                         SystemClock.sleep(200)
                         scenario.onTvActivity{activity->
                             val list=field(activity,"channels") as RecyclerView
@@ -91,18 +97,33 @@ class SeriesLayoutTest {
                             assertTrue("Space remains for multiple episodes",list.height>=TvUi.dp(activity,80))
                             val scroll=field(activity,"seriesScroll") as SeriesHeaderScroll
                             if(scale==1f)assertFalse("Compact header needs no scrolling",scroll.canScrollVertically(1))
-                            assertTrue((field(activity,"seriesResume") as View).requestFocus())
-                        }
-                        SystemClock.sleep(200)
-                        scenario.onTvActivity{activity->
-                            visible(field(activity,"seriesResume") as View)
-                            val progress=field(activity,"seriesProgress") as TextView
-                            visible(progress)
+                            val header=field(activity,"seriesHeader") as ViewGroup
+                            assertEquals("Only the favorite action remains in the header",1,header.descendants.count{it.isClickable})
+                            assertFalse("Back button removed",header.descendants.filterIsInstance<TextView>().any{it.text==activity.getString(R.string.back_series_library)})
+                            val first=list.getChildAt(0) as ViewGroup
+                            val labels=first.descendants.filterIsInstance<TextView>().filter{it.isShown}.toList()
+                            assertEquals(listOf("S01 E01","الفتوه","0:49"),labels.map{it.text.toString()})
+                            val progress=labels.last()
+                            visible(progress);visible(labels.first())
                             assertEquals("Time values retain their position / duration order in RTL",1,progress.layout.getParagraphDirection(0))
+                            assertEquals("Episode codes retain LTR digit order",1,labels.first().layout.getParagraphDirection(0))
+                            val second=list.getChildAt(1) as ViewGroup
+                            assertEquals("Unwatched episode has no duplicate number or season label",listOf("S01 E02","الفتوه"),second.descendants.filterIsInstance<TextView>().filter{it.isShown}.map{it.text.toString()}.toList())
+                            if(scale==1f){
+                                assertEquals("Unwatched rows use the existing compact TV height",TvUi.dp(activity,36),second.height)
+                                assertTrue("At least six complete episodes fit at normal text size",(list.layoutManager as LinearLayoutManager).findLastCompletelyVisibleItemPosition()>=5)
+                            }
                         }
-                        // Capture the scoped layout with its primary action focused.
-                        device.takeScreenshot(File("/sdcard/Download/series-layout-$name.png"))
+                        // The saved episode itself is the resume action.
+                        device.takeScreenshot(File("/sdcard/Download/series-compact-$name.png"))
                         scenario.onTvActivity{activity->(field(activity,"channels") as RecyclerView).getChildAt(0).requestFocus()}
+                        device.pressDPadUp()
+                        waitFor("Up reaches the fixed season selector"){(field(it,"seasonButton") as View).hasFocus()}
+                        device.pressDPadDown()
+                        waitFor("Down returns to the episode list"){
+                            val list=field(it,"channels") as RecyclerView
+                            list.findContainingViewHolder(it.currentFocus!!)?.bindingAdapterPosition==0
+                        }
                         repeat(35){device.pressDPadDown()}
                         waitFor("Last episode reachable by D-pad"){activity->
                             val list=field(activity,"channels") as RecyclerView
@@ -118,6 +139,10 @@ class SeriesLayoutTest {
                         device.pressDPadCenter()
                         assertTrue("Season selection remains functional",device.wait(androidx.test.uiautomator.Until.hasObject(androidx.test.uiautomator.By.text(if(name=="english")"Season 2 (1)" else "Staffel 2 (1)")),5_000))
                         device.pressBack()
+                        activate(if(name=="english")"All categories" else "Alle Kategorien")
+                        waitFor("Category selection returns to the series library"){
+                            field(it,"openedSeries")==null&&(field(it,"channels") as RecyclerView).layoutManager is GridLayoutManager
+                        }
                     }
                 }
             }finally{

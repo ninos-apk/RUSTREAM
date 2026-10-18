@@ -91,7 +91,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var seriesScrollHint:TextView
     private lateinit var seriesTitle:TextView
     private lateinit var seriesSummary:TextView
-    private lateinit var seriesProgress:TextView
     private lateinit var seasonButton:Button
     private lateinit var movieHeader:LinearLayout
     private lateinit var movieScroll:ScrollView
@@ -101,7 +100,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var movieRestart:Button
     private lateinit var movieFavorite:Button
     private lateinit var movieProgress:TextView
-    private lateinit var seriesResume:SeriesResumeButton
     private lateinit var seriesFavorite:Button
     /** History, favourites and progress; independent of catalog generations. */
     private val userLibrary=UserLibrary()
@@ -306,10 +304,7 @@ class MainActivity : ComponentActivity() {
             searchWork?.cancel(); renderCategories(); search(); channelSearch.requestFocus()
         }.apply { visibility=View.GONE }
         browserColumn.addView(clearFiltersButton,LinearLayout.LayoutParams(-1,-2))
-        seriesHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE;setPaddingRelative(dp(4),0,dp(4),0)}
-        seriesHeader.addView(button(getString(R.string.back_series_library)){closeSeries(true,true)}.apply{
-            gravity=Gravity.START or Gravity.CENTER_VERTICAL;isActivated=false
-        },LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(8)})
+        seriesHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE;setPaddingRelative(dp(4),dp(4),dp(4),0)}
         val seriesIdentity=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         val seriesInfo=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         seriesTitle=label("",15f).apply{textAlignment=View.TEXT_ALIGNMENT_TEXT_START}
@@ -319,21 +314,20 @@ class MainActivity : ComponentActivity() {
         seriesIdentity.addView(seriesInfo,LinearLayout.LayoutParams(0,-2,1f))
         seriesFavorite=button("☆"){openedSeriesKey?.let{toggleFavorite(LibrarySection.SERIES,it,openedSeriesName)}}.apply{textSize=16f}
         seriesIdentity.addView(seriesFavorite,LinearLayout.LayoutParams(dp(36),-2).apply{marginStart=dp(8)})
-        seriesHeader.addView(seriesIdentity,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(12)})
-        seriesResume=SeriesResumeButton(this){resumeSeries()}.apply{visibility=View.GONE}
-        seriesHeader.addView(seriesResume,LinearLayout.LayoutParams(-1,-2))
-        seriesProgress=label("",8f).apply{
-            setTextColor(TvUi.muted);visibility=View.GONE;textDirection=View.TEXT_DIRECTION_FIRST_STRONG_LTR
-            setPaddingRelative(dp(4),0,dp(4),0)
-        }
+        seriesHeader.addView(seriesIdentity,LinearLayout.LayoutParams(-1,-2))
         // Episode heading and season selector form one toolbar above the scrolling rows.
         val seasonRow=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         seasonRow.addView(label(getString(R.string.episodes_heading),11f),LinearLayout.LayoutParams(0,-2,1f))
         seasonButton=button(getString(R.string.choose_season)){chooseSeason()}
+        seasonButton.setOnKeyListener{_,key,event->
+            if(key==KeyEvent.KEYCODE_DPAD_DOWN&&openedSeries!=null&&channelRows.itemCount>0){
+                if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0)returnToChannels()
+                true
+            }else false
+        }
         seasonRow.addView(seasonButton,LinearLayout.LayoutParams(0,-2,1.5f).apply{marginStart=dp(8)})
         seriesScroll=SeriesHeaderScroll(this).apply{visibility=View.GONE;addView(seriesHeader)}
         browserColumn.addView(seriesScroll,LinearLayout.LayoutParams(-1,-2))
-        browserColumn.addView(seriesProgress,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
         seriesToolbar=seasonRow.apply{visibility=View.GONE;setPaddingRelative(dp(4),0,dp(4),0)}
         browserColumn.addView(seriesToolbar,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12);bottomMargin=dp(8)})
         movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
@@ -562,7 +556,11 @@ class MainActivity : ComponentActivity() {
     private fun selectChannel(id: Long, preserveContext:Boolean=false, fromStart:Boolean=false) {
         if(selectionWork?.isActive==true || busy) return
         if (id==selectedId && playback.player!=null && playback.phase !in setOf("idle","finished","error") && !fromStart) {
-            playerPane.cancelSeek(); setFullScreen(true); return
+            playerPane.cancelSeek()
+            if(playContext?.kind=="series"&&playContext?.show!=null&&playback.player?.playWhenReady==false){
+                selectionWork=launchSafe { if(playback.player?.playWhenReady==false)playback.togglePause() }
+            }
+            setFullScreen(true); return
         }
         playerPane.cancelSeek()
         val listed=if(special!=null&&openedSeries==null&&kind!="series")channelRows.rows.filter{it.available}.map{it.id} else null
@@ -682,27 +680,6 @@ class MainActivity : ComponentActivity() {
     private fun updateSeriesActions(){
         if(openedSeries==null)return
         val source=activeSourceId;val key=openedSeriesKey
-        val last=if(source!=null&&key!=null)userLibrary.lastEpisode(source,key) else null
-        val episodeKey=last?.episodeKey
-        if(source==null||episodeKey==null){seriesResume.visibility=View.GONE;seriesProgress.visibility=View.GONE}else{
-            val progress=userLibrary.progress(source,episodeKey)
-            val label=episodeCode(last.season,last.episode).ifEmpty{getString(R.string.last_episode)}
-            val description=when{
-                progress?.done==true->getString(R.string.series_rewatch,label)
-                progress?.resumeSec!=null->getString(R.string.series_resume_at,label,TvUi.clock(progress.resumeSec!!))
-                else->getString(R.string.series_resume,label)
-            }+(last.episodeTitle?.let{"\n$it"}?:"")
-            seriesResume.show(if(progress?.done==true)getString(R.string.play_again) else "▶ "+getString(R.string.resume),label,description.replace("\n"," · "))
-            seriesResume.visibility=View.VISIBLE
-            val current=tracker.current?.takeIf{it.source==source&&it.key==episodeKey}?.let{playback.player}
-            val position=current?.currentPosition?.div(1000.0) ?: progress?.positionSec
-            val duration=current?.duration?.takeIf{it>0}?.div(1000.0) ?: progress?.durationSec
-            seriesProgress.text=listOfNotNull(
-                if(current!=null)getString(if(current.playWhenReady)R.string.state_playing else R.string.playback_paused) else if(progress?.done==true)getString(R.string.watched) else null,
-                position?.let{TvUi.clock(it)+(duration?.let{total->" / "+TvUi.clock(total)} ?: "")}
-            ).joinToString(" · ")
-            seriesProgress.visibility=if(seriesProgress.text.isEmpty())View.GONE else View.VISIBLE
-        }
         val favorite=source!=null&&key!=null&&userLibrary.isFavorite(source,LibrarySection.SERIES,key)
         seriesFavorite.visibility=if(source!=null&&key!=null)View.VISIBLE else View.GONE
         seriesFavorite.text=if(favorite)"★" else "☆"
@@ -716,21 +693,6 @@ class MainActivity : ComponentActivity() {
         val above=channels.canScrollVertically(-1)||offset>0
         seriesScrollHint.visibility=if(openedSeries!=null&&(below||above))View.VISIBLE else View.GONE
         seriesScrollHint.setText(if(below)R.string.episodes_scroll_more else R.string.episodes_scroll_previous)
-    }
-    private fun resumeSeries(){
-        val source=activeSourceId ?: return
-        val key=openedSeriesKey ?: return
-        val episodeKey=userLibrary.lastEpisode(source,key)?.episodeKey ?: return
-        val rev=revision
-        launchSafe {
-            val item=resolveKeys(rev,listOf(episodeKey)).first[episodeKey]
-            if(rev!=revision||openedSeriesKey!=key)return@launchSafe
-            if(item==null){status.setText(R.string.last_episode_unavailable);return@launchSafe}
-            val season=item.takeIf{!it.isNull("season")}?.optLong("season")
-            // Channel +/- then continues within the season of the resumed episode.
-            if(season!=chosenSeason||unknownSeason!=(season==null)){chosenSeason=season;unknownSeason=season==null;updateSeasonLabel();libraryFocusId=null;search()}
-            selectChannel(item.getLong("id"))
-        }
     }
     private suspend fun fetchRows(rev:Long,section:String,group:Long?,text:String,start:Int,limit:Int,list:String?=null):JSONObject {
         val show=openedSeries
@@ -784,7 +746,6 @@ class MainActivity : ComponentActivity() {
         seriesHeader.visibility=if(openedSeries!=null)View.VISIBLE else View.GONE
         seriesScroll.visibility=seriesHeader.visibility
         seriesToolbar.visibility=seriesHeader.visibility
-        if(openedSeries==null)seriesProgress.visibility=View.GONE
         updateEpisodeScrollHint()
         movieHeader.visibility=if(openedMovie!=null)View.VISIBLE else View.GONE
         movieScroll.visibility=movieHeader.visibility
@@ -1575,7 +1536,7 @@ class MainActivity : ComponentActivity() {
         private val seasonsEpisodes by lazy { getString(R.string.seasons_episodes) }
         val rows=ArrayList<Row>()
         inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean,
-                           val trailing:TextView?=null,val star:StarBadge?=null,val number:TextView?=null):RecyclerView.ViewHolder(root){
+                           val trailing:TextView?=null,val star:StarBadge?=null,val episodeCode:TextView?=null):RecyclerView.ViewHolder(root){
             var row:Row?=null
             /** OK pressed on this row and whether it became a long press. */
             var okDown=false;var okLong=false
@@ -1585,7 +1546,7 @@ class MainActivity : ComponentActivity() {
         override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder{
             val card=viewType==1
             val episode=viewType==2
-            val root=LinearLayout(this@MainActivity).apply{
+            val root=(if(episode)EpisodeRowLayout(this@MainActivity) else LinearLayout(this@MainActivity)).apply{
                 id=View.generateViewId();orientation=if(card)LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
                 isClickable=true;descendantFocusability=ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(6),dp(5),dp(6),dp(5));minimumHeight=dp(36);TvUi.focus(this)
@@ -1594,9 +1555,12 @@ class MainActivity : ComponentActivity() {
                     super.onInitializeAccessibilityNodeInfo(host,info);info.className=Button::class.java.name
                     info.isSelected=host.isActivated
                     if(android.os.Build.VERSION.SDK_INT>=30){
-                        val row=(channels.findContainingViewHolder(host) as? Holder)?.row
+                        val holder=channels.findContainingViewHolder(host) as? Holder
+                        val row=holder?.row
                         val states=listOfNotNull(
-                            if(host.isActivated)getString(if(channelList)R.string.state_playing else R.string.state_selected_category) else null,
+                            if(host.isActivated)getString(if(!channelList)R.string.state_selected_category
+                                else if(holder?.episodeCode!=null&&(row?.id!=selectedId||playback.player?.playWhenReady!=true))R.string.playback_paused
+                                else R.string.state_playing) else null,
                             if(channelList&&row!=null&&favoriteOf(row))getString(R.string.state_favorite) else null,
                             if(channelList&&row!=null)progressLabel(row).first else null)
                         if(states.isNotEmpty())info.stateDescription=states.joinToString(", ")
@@ -1605,8 +1569,7 @@ class MainActivity : ComponentActivity() {
             }
             if(episode){
                 root.gravity=Gravity.CENTER_VERTICAL
-                root.setPaddingRelative(dp(8),dp(7),dp(8),dp(7))
-                root.minimumHeight=dp(40)
+                root.setPaddingRelative(dp(8),dp(5),dp(8),dp(5))
                 (root.layoutParams as RecyclerView.LayoutParams).apply{bottomMargin=dp(4);marginStart=dp(4);marginEnd=dp(4)}
                 root.background=android.graphics.drawable.StateListDrawable().apply{
                     val radius=dp(5).toFloat()
@@ -1614,19 +1577,15 @@ class MainActivity : ComponentActivity() {
                     addState(intArrayOf(android.R.attr.state_activated),TvUi.surface(TvUi.control,radius,TvUi.accent))
                     addState(intArrayOf(),TvUi.surface(TvUi.background,radius))
                 }
-                val number=label("",11f).apply{setTextColor(TvUi.muted);gravity=Gravity.CENTER;textDirection=View.TEXT_DIRECTION_LTR;fontFeatureSettings="tnum";minWidth=dp(24)}
-                root.addView(number,LinearLayout.LayoutParams(-2,-2).apply{marginEnd=dp(8)})
+                val code=label("",10f).apply{setTextColor(TvUi.muted);textDirection=View.TEXT_DIRECTION_LTR;fontFeatureSettings="tnum";setSingleLine(true)}
+                root.addView(code,LinearLayout.LayoutParams(-2,-2).apply{marginEnd=dp(8);gravity=Gravity.TOP})
                 val content=LinearLayout(this@MainActivity).apply{orientation=LinearLayout.VERTICAL}
                 val title=label("",11f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END;textAlignment=View.TEXT_ALIGNMENT_TEXT_START}
                 content.addView(title,LinearLayout.LayoutParams(-1,-2))
-                val metadataRow=LinearLayout(this@MainActivity).apply{gravity=Gravity.CENTER_VERTICAL}
-                val metadata=label("",8f).apply{setTextColor(TvUi.muted);textDirection=View.TEXT_DIRECTION_FIRST_STRONG_LTR}
-                metadataRow.addView(metadata,LinearLayout.LayoutParams(0,-2,1f))
-                val code=label("",8f).apply{setTextColor(TvUi.muted);textDirection=View.TEXT_DIRECTION_LTR;fontFeatureSettings="tnum"}
-                metadataRow.addView(code,LinearLayout.LayoutParams(-2,-2).apply{marginStart=dp(8)})
-                content.addView(metadataRow,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
+                val metadata=label("",8f).apply{setTextColor(TvUi.muted);textDirection=View.TEXT_DIRECTION_FIRST_STRONG_LTR;visibility=View.GONE}
+                content.addView(metadata,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(2)})
                 root.addView(content,LinearLayout.LayoutParams(0,-2,1f))
-                return Holder(root,title,null,metadata,false,code,number=number)
+                return Holder(root,title,null,metadata,false,episodeCode=code)
             }
             val image=if(channelList)(if(card)PosterImageView(this@MainActivity) else ImageView(this@MainActivity)).apply{
                 scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -1646,18 +1605,28 @@ class MainActivity : ComponentActivity() {
         /** Favourite and progress only; a status payload never rebinds artwork or listeners. */
         private fun bindStatus(holder:Holder,row:Row){
             if(!channelList)return
-            if(holder.number!=null){
+            if(holder.episodeCode!=null){
                 val current=if(row.id==selectedId)playback.player else null
                 val active=current!=null
-                holder.root.isActivated=active
-                holder.number.text=if(active)if(current!!.playWhenReady)"▶" else "Ⅱ" else row.episode.removePrefix("E").ifEmpty{"—"}
-                holder.number.setTextColor(if(active)TvUi.accent else TvUi.muted)
-                val state=if(active)getString(if(current!!.playWhenReady)R.string.state_playing else R.string.playback_paused) else null
-                val progress=if(active)TvUi.clock(current!!.currentPosition/1000.0) else progressLabel(row).first
-                holder.metadata?.text=if(state!=null)"$state · $progress" else progress ?: row.season?.let{getString(R.string.season,it)} ?: getString(R.string.season_unknown)
-                holder.metadata?.setTextColor(if(active||progress!=null)TvUi.accent else TvUi.muted)
-                holder.trailing?.text=episodeCode(row.season,row.episode.removePrefix("E").toLongOrNull())
-                holder.trailing?.setTextColor(if(active)TvUi.accent else TvUi.muted)
+                val source=activeSourceId
+                val progress=if(source!=null&&row.key!=null)userLibrary.progress(source,row.key) else null
+                val last=if(source!=null&&openedSeriesKey!=null)userLibrary.lastEpisode(source,openedSeriesKey!!) else null
+                val playingShow=tracker.current?.seriesKey==openedSeriesKey&&playback.player!=null
+                val remembered=!playingShow&&row.key!=null&&row.key==last?.episodeKey&&progress?.done!=true
+                holder.root.isActivated=active||remembered
+                holder.episodeCode.text=episodeCode(row.season,row.episode.removePrefix("E").toLongOrNull()).ifEmpty{"—"}
+                holder.episodeCode.setTextColor(if(active||remembered)TvUi.accent else TvUi.muted)
+                val status=when{
+                    !row.available->getString(R.string.unavailable_now)
+                    active->TvUi.clock(current!!.currentPosition/1000.0)
+                    progress?.done==true->getString(R.string.watched)
+                    progress!=null&&progress.positionSec>0->TvUi.clock(progress.positionSec)
+                    else->null
+                }
+                val titleRtl=android.text.TextDirectionHeuristics.FIRSTSTRONG_LTR.isRtl(holder.text.text,0,holder.text.text.length)
+                holder.metadata?.apply{text=status.orEmpty();visibility=if(status==null)View.GONE else View.VISIBLE
+                    textAlignment=if(titleRtl==(channels.layoutDirection==View.LAYOUT_DIRECTION_RTL))View.TEXT_ALIGNMENT_VIEW_START else View.TEXT_ALIGNMENT_VIEW_END
+                    setTextColor(if(row.available)TvUi.accent else TvUi.muted)}
                 holder.root.alpha=if(row.available)1f else 0.55f
                 return
             }
@@ -1681,7 +1650,7 @@ class MainActivity : ComponentActivity() {
             val activeCategory=when(special){"recent"->RECENT_ROW;"favorites"->FAVORITES_ROW;else->category?:-1L}
             val active=if(channelList)!row.series&&row.id==selectedId&&::playback.isInitialized&&playback.player!=null else row.id==activeCategory
             holder.root.isActivated=active
-            holder.text.text=if(holder.number!=null){
+            holder.text.text=if(holder.episodeCode!=null){
                 // The provider's full title stays available through Info / long OK.
                 val suffix=if(row.season!=null&&row.episode.isNotEmpty())Regex("(?i)\\s*S0*${row.season}\\s*E0*${row.episode.removePrefix("E").trimStart('0').ifEmpty{"0"}}\\s*$") else null
                 suffix?.replace(row.title,"")?.trim()?.takeIf{it.isNotEmpty()} ?: row.title

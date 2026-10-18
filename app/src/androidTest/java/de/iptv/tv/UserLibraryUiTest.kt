@@ -144,12 +144,29 @@ class UserLibraryUiTest {
                             val recent=library(a).recent(source(a)!!,LibrarySection.SERIES)
                             recent.size==1&&recent[0].name=="Demo Show"&&recent[0].episode==2L&&recent[0].season==1L
                         }
+                        onMain{playback(it).player!!.seekTo(12_000)}
+                        waitFor("Episode seek completes"){(playback(it).player?.currentPosition?:0)>=12_000}
+                        device.pressKeyCode(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                        waitFor("Episode pause stores its resume position"){a->
+                            val last=library(a).recent(source(a)!!,LibrarySection.SERIES).first()
+                            (library(a).progress(source(a)!!,last.episodeKey!!)?.positionSec?:0.0)>=12.0
+                        }
                         click("☆")
                         waitFor("Show favourite, never an episode"){a->
                             val favorites=library(a).favorites(source(a)!!,LibrarySection.SERIES)
                             favorites.size==1&&favorites[0].key.startsWith("s:")
                         }
                         device.executeShellCommand("screencap -p /sdcard/Download/user-library-series.png")
+                        lateinit var pausedEpisodePlayer:androidx.media3.exoplayer.ExoPlayer
+                        onMain{pausedEpisodePlayer=playback(it).player!!}
+                        pressCard("Demo Show S1 E2")
+                        waitFor("Clicking the already paused episode resumes without reloading"){a->
+                            playback(a).player===pausedEpisodePlayer&&pausedEpisodePlayer.isPlaying&&field(a,"fullScreen")==true
+                        }
+                        device.pressBack()
+                        waitFor("Preview restored after resuming the episode"){field(it,"fullScreen")==false}
+                        device.pressKeyCode(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                        waitFor("Episode paused again before restart"){playback(it).player?.playWhenReady==false}
                     }finally{finishTvActivity(activeActivity)}
                 }
                 // finishTvActivity destroys the Activity; the store writes outside its scope.
@@ -186,13 +203,17 @@ class UserLibraryUiTest {
                             val key=library(a).recent(source,LibrarySection.MOVIES)[0].key
                             library(a).favoriteCount(source,LibrarySection.MOVIES)==0&&library(a).progress(source,key)!=null&&library(a).recentCount(source,LibrarySection.MOVIES)==1
                         }
-                        // Series overview offers the last episode.
+                        // The episode row replaces the redundant header Resume action.
                         device.pressBack()
                         click("Series (1)")
                         pressCard("Demo Show")
-                        assertTrue(device.wait(Until.hasObject(By.descStartsWith("▶ Fortsetzen · S01 E02")),10_000))
+                        waitFor("The paused episode is highlighted with its saved time"){a->
+                            val row=a.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<ViewGroup>().firstOrNull{it.contentDescription=="Demo Show S1 E2"}
+                            row?.isActivated==true&&row.descendants.filterIsInstance<android.widget.TextView>().any{it.isShown&&it.text.toString().startsWith("0:1")}
+                        }
                         device.executeShellCommand("screencap -p /sdcard/Download/user-library-series-resume.png")
-                        click("← Serienbibliothek")
+                        pressCard("Demo Show S1 E2")
+                        waitFor("Selecting the episode resumes its saved position"){playback(it).title=="Demo Show S1 E2"&&(playback(it).player?.currentPosition?:0)>=12_000}
                         pressCard("★ Favoriten (1)")
                         assertTrue(device.wait(Until.hasObject(By.desc("Demo Show")),5_000))
                     }finally{finishTvActivity(activeActivity)}
