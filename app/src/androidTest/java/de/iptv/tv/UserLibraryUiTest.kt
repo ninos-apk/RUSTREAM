@@ -119,8 +119,8 @@ class UserLibraryUiTest {
                         pressCard("Resume Film")
                         assertTrue(device.wait(Until.hasObject(By.text("Abspielen")),5_000))
                         onMain{a->assertEquals("Opening details is not history",0,library(a).recentCount(source(a)!!,LibrarySection.MOVIES))}
-                        click("☆ Zu Favoriten hinzufügen")
-                        assertTrue(device.wait(Until.hasObject(By.text("★ Aus Favoriten entfernen")),5_000))
+                        pressCard("Zu Favoriten hinzufügen")
+                        assertTrue(device.wait(Until.hasObject(By.desc("Aus Favoriten entfernen").text("★")),5_000))
                         click("Abspielen")
                         waitPlaying("Resume Film")
                         waitFor("Movie playing"){a->playback(a).player?.isPlaying==true}
@@ -197,7 +197,7 @@ class UserLibraryUiTest {
                         waitFor("Resumed at the saved position"){a->(playback(a).player?.currentPosition?:0)>=12_000}
 
                         // Removing the favourite (still in the details) keeps history and progress.
-                        click("★ Aus Favoriten entfernen")
+                        pressCard("Aus Favoriten entfernen")
                         waitFor("Favourite removed, progress kept"){a->
                             val source=source(a)!!
                             val key=library(a).recent(source,LibrarySection.MOVIES)[0].key

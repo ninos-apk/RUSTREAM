@@ -391,3 +391,52 @@ fn xtream_same_titles_keep_provider_identity_and_skip_empty_cover_fields() {
         "https://images.test/other"
     );
 }
+
+#[test]
+fn metadata_keeps_list_ratings_encrypted_and_out_of_browse_and_navigation() {
+    let f = Fixture::new();
+    let groups = f.file(
+        "meta-categories.json",
+        r#"[{"category_id":1,"category_name":"Drama"}]"#,
+    );
+    let movies = f.file("meta-movies.json", r#"[{"stream_id":275972,"name":"Film","category_id":1,"rating":"7.456","rating_5based":3.728,"tmdb_id":"1589891","password":"must-not-be-copied"}]"#);
+    let shows = f.file(
+        "meta-shows.json",
+        r#"[{"series_id":10,"name":"Show","category_id":1,"rating":8.1,"tmdb":20}]"#,
+    );
+    let manifest=f.file("meta-manifest.json",&json!({"server":"https://provider.test/base","username":"account","password":"secret","account":{"user_info":{"auth":1,"status":"Active"}},"movies":movies,"movies_categories":groups,"series":shows,"series_categories":groups}).to_string());
+    let mut e = Engine::default();
+    call(
+        &mut e,
+        json!({"op":"build_catalog","path":manifest,"target":f.db(),"key":KEY,"xtream":true}),
+    );
+    let r = call(&mut e, json!({"op":"open_catalog","path":f.db(),"key":KEY}))["revision"]
+        .as_u64()
+        .unwrap();
+    let page = browse(&mut e, r, "movies", "", 0, 64);
+    assert!(!page.to_string().contains("secret"));
+    assert!(page["items"][0].get("url").is_none());
+    let metadata = call(&mut e, json!({"op":"metadata","revision":r,"id":0}));
+    assert_eq!(metadata["attributes"]["rating"], "7.456");
+    assert_eq!(metadata["attributes"]["tmdb_id"], "1589891");
+    assert_eq!(metadata["provider_metadata"], true);
+    assert!(metadata["attributes"].get("password").is_none());
+    let show = call(&mut e, json!({"op":"metadata","revision":r,"id":1}));
+    assert_eq!(show["series_id"], "10");
+    assert_eq!(show["attributes"]["tmdb"], "20");
+    let bytes = fs::read(f.db()).unwrap();
+    assert!(
+        !bytes
+            .windows(b"1589891".len())
+            .any(|part| part == b"1589891")
+    );
+    assert!(
+        !bytes
+            .windows(b"/account/secret/".len())
+            .any(|part| part == b"/account/secret/")
+    );
+    assert!(
+        e.execute(serde_json::from_value(json!({"op":"metadata","revision":r+1,"id":0})).unwrap())
+            .is_err()
+    );
+}

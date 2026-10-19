@@ -23,6 +23,7 @@ object TvUi {
     val muted = Color.rgb(143, 157, 176)
     val accent = Color.rgb(103, 222, 211)
     val warning = 0xFFFFC777.toInt()
+    val favoriteActive = 0xFFFFD54F.toInt()
     val control = Color.rgb(27, 43, 49)
     val focused = Color.rgb(31, 62, 70)
     fun dp(context: Context, value: Int) = (value * context.resources.displayMetrics.density).toInt()

@@ -100,6 +100,16 @@ class MainActivity : ComponentActivity() {
     private lateinit var movieRestart:Button
     private lateinit var movieFavorite:Button
     private lateinit var movieProgress:TextView
+    private lateinit var metadataStore:MetadataStore
+    private lateinit var metadata:MetadataService
+    private var metadataWork:Job?=null
+    private var detailWork:Job?=null
+    private var movieDetailsView:MovieDetailsView?=null
+    private var detailRow:Row?=null
+    private var detailFocus:View?=null
+    private var detailPlayer=false
+    private var detailFromGrid=false
+    private val favoriteWrites=HashSet<String>()
     private lateinit var seriesFavorite:Button
     /** History, favourites and progress; independent of catalog generations. */
     private val userLibrary=UserLibrary()
@@ -122,7 +132,8 @@ class MainActivity : ComponentActivity() {
     private var seasonOffset=0
     private var seasonTotal=0
     private var seriesWork:Job?=null
-    private data class BrowseSnapshot(val total:Int,val focus:Long?,val index:Int)
+    private data class BrowseSnapshot(val total:Int,val focus:Long?,val index:Int,val rows:List<Row>,val offset:Int,val layout:android.os.Parcelable?)
+    private fun snapshotBrowse()=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex,channelRows.rows.toList(),offset,channels.layoutManager?.onSaveInstanceState())
     private var browseSnapshot:BrowseSnapshot?=null
     /** [ids] is the fixed order of a history/favourites list; channel +/- steps through it. */
     private data class PlayContext(val kind:String,val category:Long?,val query:String,val show:Long?,val season:Long?,val unknown:Boolean,val ids:List<Long>?=null)
@@ -192,6 +203,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         artwork=ArtworkLoader(applicationContext)
+        metadataStore=MetadataStore(applicationContext)
+        metadata=MetadataService(metadataStore.cache,{metadataStore.token})
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         loader = SourceLoader(applicationContext); store = SourceStore(this); epgStore = SourceStore(this, "epg.enc")
         try { core = Core() } catch (_: Throwable) {
@@ -227,6 +240,7 @@ class MainActivity : ComponentActivity() {
         startup.showLoading(getString(R.string.loading_saved_source))
         startupWork = launchSafe {
             if (!userLibraryLoaded) {
+                metadataStore.load()
                 // Before the catalog opens, so the first list already shows stars and progress.
                 libraryStore.load(userLibrary); userLibraryLoaded = true
                 userLibrary.listener = { libraryStore.schedule(userLibrary); onLibraryChanged() }
@@ -330,22 +344,30 @@ class MainActivity : ComponentActivity() {
         browserColumn.addView(seriesScroll,LinearLayout.LayoutParams(-1,-2))
         seriesToolbar=seasonRow.apply{visibility=View.GONE;setPaddingRelative(dp(4),0,dp(4),0)}
         browserColumn.addView(seriesToolbar,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(12);bottomMargin=dp(8)})
-        movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE}
-        movieHeader.addView(button(getString(R.string.back_movie_library)){closeSeries(true,true)},LinearLayout.LayoutParams(-1,-2))
+        movieHeader=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE;setPaddingRelative(dp(4),dp(4),dp(4),0)}
+        val movieIdentity=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
+        movieTitle=label("",15f).apply{textAlignment=View.TEXT_ALIGNMENT_TEXT_START}
+        movieIdentity.addView(movieTitle,LinearLayout.LayoutParams(0,-2,1f))
+        movieFavorite=button("☆"){openedMovie?.let{row->row.key?.let{toggleFavorite(LibrarySection.MOVIES,it,row.title)}}}.apply{
+            textSize=16f;setPaddingRelative(0,dp(6),0,dp(6))
+        }
+        movieIdentity.addView(movieFavorite,LinearLayout.LayoutParams(dp(36),-2).apply{marginStart=dp(8)})
+        movieHeader.addView(movieIdentity,LinearLayout.LayoutParams(-1,-2))
         moviePoster=ImageView(this).apply{scaleType=ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
-        movieHeader.addView(moviePoster,LinearLayout.LayoutParams(-1,dp(100)))
-        movieTitle=label("",15f).apply{setPadding(dp(6),dp(8),dp(6),dp(8))}
-        movieHeader.addView(movieTitle)
-        movieProgress=label("",12f).apply{setTextColor(TvUi.muted);setPadding(dp(6),0,dp(6),dp(6));visibility=View.GONE}
+        movieHeader.addView(moviePoster,LinearLayout.LayoutParams(-1,dp(100)).apply{topMargin=dp(12);bottomMargin=dp(12)})
+        movieProgress=label("",12f).apply{setTextColor(TvUi.muted);setPaddingRelative(0,0,0,dp(8));visibility=View.GONE}
         movieHeader.addView(movieProgress)
         // Saved progress resumes automatically; "from the start" ignores it.
         moviePlay=button(getString(R.string.play)){openedMovie?.let{selectChannel(it.id)}}
         movieHeader.addView(moviePlay,LinearLayout.LayoutParams(-1,-2))
+        movieHeader.addView(button(getString(R.string.movie_details)){openedMovie?.let(::openMovieDetails)},LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
         movieRestart=button(getString(R.string.play_from_start)){openedMovie?.let{selectChannel(it.id,fromStart=true)}}.apply{visibility=View.GONE}
         movieHeader.addView(movieRestart,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
-        movieFavorite=button("☆ "+getString(R.string.favorite_add)){openedMovie?.let{row->row.key?.let{toggleFavorite(LibrarySection.MOVIES,it,row.title)}}}
-        movieHeader.addView(movieFavorite,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4)})
-        movieScroll=ScrollView(this).apply{isFillViewport=false;visibility=View.GONE;addView(movieHeader)}
+        movieScroll=ScrollView(this).apply{
+            isFillViewport=false;visibility=View.GONE;isFocusable=false
+            isVerticalScrollBarEnabled=true;isScrollbarFadingEnabled=false;isSmoothScrollingEnabled=false
+            addView(movieHeader)
+        }
         browserColumn.addView(movieScroll,LinearLayout.LayoutParams(-1,0,1f))
         browserColumn.addView(channels,LinearLayout.LayoutParams(-1,0,1f))
         resultCount=label(resources.getQuantityString(R.plurals.entries_count,0,0),10f).apply { setTextColor(TvUi.muted) }
@@ -407,6 +429,7 @@ class MainActivity : ComponentActivity() {
         channels.setItemViewCacheSize(18)
         channels.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(view: RecyclerView,dx: Int,dy: Int) {
+                scheduleMetadata()
                 updateEpisodeScrollHint()
                 val layout=view.layoutManager as LinearLayoutManager
                 if (layout.findLastVisibleItemPosition()>=channelRows.itemCount-12) loadNextPage()
@@ -435,12 +458,117 @@ class MainActivity : ComponentActivity() {
         artwork.prefetch(positions.map{channelRows.rows[it].let{row->artworkKey(rev,row.id,row.series) to artworkAddress(rev,row.id,row.series)}},columns*2)
     }
     private fun artworkKey(rev:Long,id:Long,series:Boolean)="$rev:$id:$series"
+    private val metadataLanguage get()=if(AppLanguage.current(this)=="de")"de-DE" else "en-US"
+    private fun metadataItem(row:Row):MetadataItem? {
+        val source=activeSourceId?:return null
+        val key=row.key?:return null
+        if(kind!="movies"&&kind!="series"||!row.available)return null
+        return MetadataItem(source,key,if(row.series)MediaType.TV else MediaType.MOVIE,row.title,row.year.toIntOrNull())
+    }
+    /** Two cancellable lanes, visible cards and one adjacent row only; never an import sweep. */
+    private fun scheduleMetadata(){
+        metadataWork?.cancel()
+        if(!gridMode||kind !in listOf("movies","series")||!channels.isShown)return
+        metadataWork=scope.launch{
+            delay(160)
+            val layout=channels.layoutManager as? GridLayoutManager?:return@launch
+            val first=layout.findFirstVisibleItemPosition();val last=layout.findLastVisibleItemPosition()
+            if(first<0||last<first)return@launch
+            val rev=revision;val language=metadataLanguage
+            val positions=((first..last).toList()+((last+1)..minOf(last+layout.spanCount,channelRows.itemCount-1)).toList())
+                .filter{it in channelRows.rows.indices}.distinct().take(48)
+            val work=positions.mapNotNull{position->val row=channelRows.rows[position];metadataItem(row)?.let{Triple(position,row,it)}}
+            kotlinx.coroutines.coroutineScope{
+                repeat(2){lane->launch{
+                    for(index in lane until work.size step 2){
+                        val (_,row,item)=work[index]
+                        metadata.load(item,language){core.call("metadata","revision" to rev,"id" to row.id)}
+                        if(rev!=revision||!gridMode)return@launch
+                        // Shared TMDB data may serve more than one local card. Status payloads
+                        // preserve focus and do not rebind posters.
+                        for(i in 0 until channels.childCount){
+                            val holder=channels.getChildViewHolder(channels.getChildAt(i)) as? Rows.Holder?:continue
+                            holder.row?.let{channelRows.refreshRating(holder,it)}
+                        }
+                    }
+                }}
+            }
+        }
+    }
+    private fun openMovieDetails(row:Row){
+        val item=metadataItem(row)?:return
+        detailWork?.cancel();metadataWork?.cancel()
+        detailFocus=currentFocus;detailRow=row;detailPlayer=false;detailFromGrid=openedMovie==null
+        movieDetailsView?.let{it.dispose();stage.removeView(it)}
+        val pane=MovieDetailsView(this,item,artwork,::closeMovieDetails,{
+            detailPlayer=true;movieDetailsView?.visibility=View.GONE;chrome.visibility=View.VISIBLE
+            if(openedMovie==null)openMovie(row)
+            selectChannel(row.id);video.requestFocus()
+        },{toggleFavorite(LibrarySection.MOVIES,item.key,row.title)},{metadataCorrection(item)},{loadMovieDetails(item,row,true)})
+        movieDetailsView=pane
+        pane.bindPoster(artworkKey(revision,row.id,false),artworkAddress(revision,row.id,false))
+        updateDetailFavorite()
+        metadata.peek(item,metadataLanguage)?.let{pane.render(it,null)}
+        chrome.visibility=View.GONE;stage.addView(pane,FrameLayout.LayoutParams(-1,-1));pane.backButton.requestFocus()
+        loadMovieDetails(item,row)
+    }
+    private fun updateDetailFavorite(){
+        val row=detailRow?:return;val source=activeSourceId?:return;val key=row.key?:return
+        movieDetailsView?.favorite(userLibrary.isFavorite(source,LibrarySection.MOVIES,key))
+    }
+    private fun loadMovieDetails(item:MetadataItem,row:Row,refresh:Boolean=false){
+        detailWork?.cancel()
+        val rev=revision;val pane=movieDetailsView?:return
+        if(refresh){metadataStore.cache.expire("${item.identity}:$metadataLanguage");pane.loading()}
+        detailWork=scope.launch{
+            val result=metadata.load(item,metadataLanguage,true){core.call("metadata","revision" to rev,"id" to row.id)}
+            if(rev==revision&&movieDetailsView===pane){pane.render(result,null);updateDetailFavorite()}
+        }
+    }
+    private fun closeMovieDetails(){
+        val restoreGrid=detailFromGrid&&openedMovie!=null
+        detailWork?.cancel();movieDetailsView?.let{it.dispose();stage.removeView(it)}
+        movieDetailsView=null;detailRow=null;detailPlayer=false;chrome.visibility=View.VISIBLE
+        detailFromGrid=false
+        if(restoreGrid){closeSeries(true,true);detailFocus=null;return}
+        if(detailFocus?.takeIf{it.isShown&&it.isAttachedToWindow}?.requestFocus()!=true)returnToChannels()
+        detailFocus=null;scheduleMetadata()
+    }
+    private fun metadataCorrection(item:MetadataItem){
+        val candidates=metadata.peek(item,metadataLanguage)?.candidates.orEmpty()
+        fun choose(id:Long?){scope.launch{
+            val old=metadataStore.cache.overrideFor(item)
+            metadataStore.cache.override(item,id)
+            try{metadataStore.persist();detailRow?.let{loadMovieDetails(item,it)}?:scheduleMetadata()}
+            catch(_:Exception){metadataStore.cache.override(item,old);AlertDialog.Builder(this@MainActivity).setMessage(R.string.metadata_save_failed).setPositiveButton(R.string.close,null).show()}
+        }}
+        val input=EditText(this).apply{hint=getString(R.string.metadata_id);contentDescription=hint;inputType=InputType.TYPE_CLASS_NUMBER;filters=arrayOf(android.text.InputFilter.LengthFilter(10))}
+        val dialog=AlertDialog.Builder(this).setTitle(R.string.metadata_correct).setView(input)
+            .setItems(candidates.map{"${it.title} (${it.year?:"—"}) · ${it.id}"}.toTypedArray()){_,index->choose(candidates[index].id)}
+            .setPositiveButton(R.string.apply,null).setNeutralButton(R.string.metadata_automatic){_,_->choose(null)}.setNegativeButton(R.string.cancel,null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val id=input.text.toString().toLongOrNull()?.takeIf{it>0&&it<=Int.MAX_VALUE}
+            if(id==null){input.error=getString(R.string.metadata_invalid_id);input.requestFocus()}else{choose(id);dialog.dismiss()}
+        }};dialog.show()
+    }
+    private fun metadataSettings(){
+        val input=EditText(this).apply{hint=getString(R.string.metadata_token);contentDescription=hint;inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(metadataStore.token.orEmpty());filters=arrayOf(android.text.InputFilter.LengthFilter(4096))}
+        val dialog=AlertDialog.Builder(this).setTitle(R.string.metadata_settings).setMessage(R.string.metadata_token_hint).setView(input)
+            .setPositiveButton(R.string.apply,null).setNegativeButton(R.string.cancel,null).create()
+        dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val value=input.text.toString().trim()
+            if(value.contains(Regex("\\s"))){input.error=getString(R.string.metadata_invalid_token);input.requestFocus();return@setOnClickListener}
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
+            scope.launch{try{metadataStore.setToken(value);status.setText(R.string.metadata_saved);dialog.dismiss();scheduleMetadata()}
+                catch(_:Exception){input.error=getString(R.string.metadata_save_failed);dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=true}}
+        }};dialog.show()
+    }
     private fun artworkAddress(rev:Long,id:Long,series:Boolean):suspend ()->String?={
         core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}
     }
     private fun settingsDialog() {
         val choices=listOf(R.string.settings_sources,R.string.settings_add_file,R.string.settings_add_url,R.string.settings_xtream,R.string.settings_epg,R.string.settings_picture,
-            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info).map { getString(it) }
+            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info,R.string.metadata_settings).map { getString(it) }
         val dialog=AlertDialog.Builder(this).create()
         val menu=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
@@ -451,7 +579,7 @@ class MainActivity : ComponentActivity() {
         val actions=choices.mapIndexed { index,choice ->
             button(choice) {
                     dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog() }
+                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog();11->metadataSettings() }
             }.apply {
                 menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
             }
@@ -647,8 +775,21 @@ class MainActivity : ComponentActivity() {
     }
     private fun toggleFavorite(section:LibrarySection,key:String,name:String){
         val source=activeSourceId ?: return
+        val writeKey="$source:${section.key}:$key"
+        if(!favoriteWrites.add(writeKey))return
+        val previous=userLibrary.isFavorite(source,section,key)
         val index=channelRows.rows.indexOfFirst{it.key==key}
-        userLibrary.toggleFavorite(source,section,key,name)
+        userLibrary.setFavorite(source,section,key,name,!previous)
+        updateDetailFavorite()
+        scope.launch{
+            libraryStore.flush(userLibrary).join()
+            if(libraryStore.lastError!=null){
+                userLibrary.setFavorite(source,section,key,name,previous)
+                status.setText(R.string.metadata_save_failed)
+                movieDetailsView?.let{AlertDialog.Builder(this@MainActivity).setMessage(R.string.metadata_save_failed).setPositiveButton(R.string.close,null).show()}
+            }
+            favoriteWrites.remove(writeKey);updateDetailFavorite()
+        }
         // In the favourites list the removed entry disappears; focus moves to its successor.
         if(special=="favorites"&&openedSeries==null&&openedMovie==null&&index>=0&&!userLibrary.isFavorite(source,section,key)){pendingSpecialFocus=index;search()}
     }
@@ -673,7 +814,7 @@ class MainActivity : ComponentActivity() {
                 // A changed history list re-sorts only while the user is not inside it.
                 if(special!=null&&openedSeries==null&&openedMovie==null&&!channels.hasFocus())search()
             }
-            updateMovieActions();updateSeriesActions();updatePlayerFavorite()
+            updateMovieActions();updateSeriesActions();updatePlayerFavorite();updateDetailFavorite()
         }
     }
     private fun updateMovieActions(){
@@ -693,8 +834,10 @@ class MainActivity : ComponentActivity() {
         movieProgress.visibility=if(movieProgress.text.isEmpty())View.GONE else View.VISIBLE
         val favorite=source!=null&&row.key!=null&&userLibrary.isFavorite(source,LibrarySection.MOVIES,row.key)
         movieFavorite.visibility=if(source!=null&&row.key!=null)View.VISIBLE else View.GONE
-        movieFavorite.text=if(favorite)"★ "+getString(R.string.favorite_remove) else "☆ "+getString(R.string.favorite_add)
-        movieFavorite.isActivated=true;movieFavorite.isSelected=favorite
+        movieFavorite.text=if(favorite)"★" else "☆"
+        movieFavorite.contentDescription=getString(if(favorite)R.string.favorite_remove else R.string.favorite_add)
+        movieFavorite.setTextColor(if(favorite)TvUi.accent else Color.WHITE)
+        movieFavorite.isSelected=favorite
     }
     private fun updateSeriesActions(){
         if(openedSeries==null)return
@@ -777,11 +920,13 @@ class MainActivity : ComponentActivity() {
         channels.contentDescription=getString(if(openedSeries!=null)R.string.episodes_list else if(shouldGrid)(if(kind=="series")R.string.series_library else R.string.movie_library) else R.string.entries_list)
         channels.post{updateGridColumns()}
         if(!shouldGrid){prefetchWork?.cancel();artwork.prefetch(emptyList())}
+        if(shouldGrid)channels.post{scheduleMetadata()} else metadataWork?.cancel()
     }
     private fun openMovie(row:Row){
         if(busy)return
-        browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
+        browseSnapshot=snapshotBrowse()
         openedMovie=row
+        movieScroll.scrollTo(0,0)
         movieTitle.text=listOf(row.title,row.year,row.quality).filter{it.isNotEmpty()}.joinToString("\n")
         updateMovieActions()
         val rev=revision
@@ -803,7 +948,7 @@ class MainActivity : ComponentActivity() {
             }
             if(rev!=revision||generation!=searchGeneration)return@launchSafe
             if(status.text.toString()==getString(R.string.loading_episodes))status.text=resources.getQuantityString(R.plurals.episodes_available,data.getInt("total"),data.getInt("total"))
-            browseSnapshot=BrowseSnapshot(total,libraryFocusId,libraryFocusIndex)
+            browseSnapshot=snapshotBrowse()
             openedSeries=id;seasonOffset=0;seriesSeasons=data.getJSONArray("seasons");seasonTotal=data.getInt("season_total")
             openedSeriesKey=data.optString("key").takeIf{it.isNotEmpty()&&it!="null"};openedSeriesName=data.getString("name")
             // Open on the season of the last watched episode when the first season page lists it.
@@ -841,6 +986,7 @@ class MainActivity : ComponentActivity() {
         seasonOffset=start;seriesSeasons=data.getJSONArray("seasons");chooseSeason()
     }}
     private fun closeSeries(restore:Boolean,focus:Boolean){
+        if(!restore&&movieDetailsView!=null){detailFromGrid=false;closeMovieDetails()}
         seriesWork?.cancel()
         if(openedSeries==null&&openedMovie==null){if(!restore)browseSnapshot=null;return}
         val generation=++searchGeneration
@@ -854,6 +1000,19 @@ class MainActivity : ComponentActivity() {
         updateLibraryLayout()
         if(restore&&snapshot==null)search()
         if(restore&&snapshot!=null){
+            if(special!="favorites"){
+                offset=snapshot.offset;total=snapshot.total
+                libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
+                channelRows.replace(snapshot.rows)
+                resultCount.text=resources.getQuantityString(if(kind=="series")R.plurals.series_count else R.plurals.movies_count,total,total)
+                channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
+                channels.layoutManager?.onRestoreInstanceState(snapshot.layout)
+                channels.post{
+                    if(focus)snapshot.focus?.let{channels.findViewHolderForItemId(it)?.itemView?.requestFocus()}
+                    scheduleMetadata()
+                }
+                return
+            }
             offset=(snapshot.index/64)*64;total=snapshot.total;channelRows.replace(emptyList())
             libraryFocusId=snapshot.focus;libraryFocusIndex=snapshot.index;libraryFocusRevision=revision
             resultCount.text=resources.getQuantityString(if(kind=="series")R.plurals.series_count else R.plurals.movies_count,total,total);channelEmpty.visibility=if(total==0)View.VISIBLE else View.GONE
@@ -949,6 +1108,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
+        if(::channels.isInitialized)channels.post{scheduleMetadata()}
+        detailRow?.let{row->metadataItem(row)?.let{loadMovieDetails(it,row)}}
         if (::artwork.isInitialized) artwork.setActive(true)
         if (!::playback.isInitialized) return
         val previous = lifecycleWork
@@ -965,6 +1126,7 @@ class MainActivity : ComponentActivity() {
         if (first.requestFocus()) firstChannelFocus = false
     }
     override fun onStop() {
+        metadataWork?.cancel();detailWork?.cancel()
         if (::playerPane.isInitialized) playerPane.cancelSeek()
         // Downloads already running finish into the caches; nothing new starts in the background.
         if (::artwork.isInitialized) artwork.setActive(false)
@@ -976,6 +1138,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        movieDetailsView?.dispose()
+        if(::metadataStore.isInitialized)metadataStore.close()
         if (::playback.isInitialized) { playback.release(); if (userLibraryLoaded) libraryStore.flush(userLibrary) }
         if (::artwork.isInitialized) artwork.close()
         scope.cancel()
@@ -1437,6 +1601,8 @@ class MainActivity : ComponentActivity() {
         playerPane.cancelSeek()
         if(playerPane.controlsVisible && playerPane.hasFocus()) playerPane.hideControls()
         else if(fullScreen) setFullScreen(false)
+        else if(detailPlayer){detailPlayer=false;chrome.visibility=View.GONE;movieDetailsView?.visibility=View.VISIBLE;movieDetailsView?.playButton?.requestFocus()}
+        else if(movieDetailsView!=null)closeMovieDetails()
         else if(playerPane.hasFocus())returnToChannels()
         else if(openedSeries!=null||openedMovie!=null)closeSeries(true,true) else finish()
     }
@@ -1531,6 +1697,11 @@ class MainActivity : ComponentActivity() {
     private fun rowActions(row:Row){
         val source=activeSourceId;val section=listSection
         val actions=mutableListOf<Pair<String,()->Unit>>()
+        if(kind=="movies"&&row.available){
+            actions+=getString(R.string.play) to {selectChannel(row.id)}
+            actions+=getString(R.string.movie_details) to {openMovieDetails(row)}
+        }
+        if(row.series&&row.available)metadataItem(row)?.let{item->actions+=getString(R.string.metadata_correct) to {metadataCorrection(item)}}
         // Episodes are never favourites themselves: the action applies to their show.
         val favoriteKey=if(openedSeries!=null)openedSeriesKey else row.key
         val favoriteName=if(openedSeries!=null)openedSeriesName else row.title
@@ -1553,7 +1724,7 @@ class MainActivity : ComponentActivity() {
         private val seasonsEpisodes by lazy { getString(R.string.seasons_episodes) }
         val rows=ArrayList<Row>()
         inner class Holder(val root:LinearLayout,val text:TextView,val image:ImageView?,val metadata:TextView?,val card:Boolean,
-                           val trailing:TextView?=null,val star:StarBadge?=null,val episodeCode:TextView?=null):RecyclerView.ViewHolder(root){
+                           val trailing:TextView?=null,val star:StarBadge?=null,val episodeCode:TextView?=null,val rating:TextView?=null):RecyclerView.ViewHolder(root){
             var row:Row?=null
             /** OK pressed on this row and whether it became a long press. */
             var okDown=false;var okLong=false
@@ -1563,7 +1734,7 @@ class MainActivity : ComponentActivity() {
         override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder{
             val card=viewType==1
             val episode=viewType==2
-            val root=(if(episode)EpisodeRowLayout(this@MainActivity) else LinearLayout(this@MainActivity)).apply{
+            val root=(if(episode)EpisodeRowLayout(this@MainActivity) else if(card)PosterCardLayout(this@MainActivity) else LinearLayout(this@MainActivity)).apply{
                 id=View.generateViewId();orientation=if(card)LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
                 isClickable=true;descendantFocusability=ViewGroup.FOCUS_BLOCK_DESCENDANTS
                 setPadding(dp(6),dp(5),dp(6),dp(5));minimumHeight=dp(36);TvUi.focus(this)
@@ -1579,6 +1750,7 @@ class MainActivity : ComponentActivity() {
                                 else if(holder?.episodeCode!=null&&(row?.id!=selectedId||playback.player?.playWhenReady!=true))R.string.playback_paused
                                 else R.string.state_playing) else null,
                             if(channelList&&row!=null&&favoriteOf(row))getString(R.string.state_favorite) else null,
+                            holder?.rating?.text?.toString()?.takeIf{it.isNotEmpty()},
                             if(channelList&&row!=null)progressLabel(row).first else null)
                         if(states.isNotEmpty())info.stateDescription=states.joinToString(", ")
                     }
@@ -1612,12 +1784,21 @@ class MainActivity : ComponentActivity() {
             val text=label("",if(card)12f else 11f).apply{maxLines=2;ellipsize=TextUtils.TruncateAt.END}
             root.addView(text,LinearLayout.LayoutParams(if(card)-1 else 0,-2,if(card)0f else 1f))
             val metadata=if(card)label("",8f).apply{setTextColor(TvUi.muted);root.addView(this,LinearLayout.LayoutParams(-1,-2))}else null
+            // On these compact TV cards the badge is text below the poster, so it can grow at
+            // 200% font size and never overlap the independently drawn favourite star.
+            val rating=if(card)label("",11f).apply{
+                minLines=2
+                setLineSpacing(0f,1.4f)
+                setTextColor(Color.WHITE);setPaddingRelative(dp(4),dp(4),dp(4),dp(4));setBackgroundColor(TvUi.background)
+                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                root.addView(this,1,LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(4);bottomMargin=dp(4)})
+            }else null
             // List rows (channels, episodes) end with progress text and the favourite star.
             val trailing=if(channelList&&!card)label("",11f).apply{setTextColor(TvUi.muted);visibility=View.GONE;fontFeatureSettings="tnum"
                 root.addView(this,LinearLayout.LayoutParams(-2,-2).apply{marginStart=dp(4)})}else null
             val star=if(channelList&&!card)StarBadge(this@MainActivity).apply{visibility=View.GONE
                 root.addView(this,LinearLayout.LayoutParams(dp(18),dp(18)).apply{marginStart=dp(4)})}else null
-            return Holder(root,text,image,metadata,card,trailing,star)
+            return Holder(root,text,image,metadata,card,trailing,star,rating=rating)
         }
         /** Favourite and progress only; a status payload never rebinds artwork or listeners. */
         private fun bindStatus(holder:Holder,row:Row){
@@ -1655,7 +1836,17 @@ class MainActivity : ComponentActivity() {
             holder.metadata?.text=label ?: if(row.series)seasonsEpisodes else listOf(row.year,row.quality).filter{it.isNotEmpty()}.joinToString(" · ")
             holder.metadata?.setTextColor(if(label!=null&&row.available)TvUi.accent else TvUi.muted)
             holder.root.alpha=if(row.available)1f else 0.55f
+            refreshRating(holder,row)
         }
+        fun refreshRating(holder:Holder,row:Row){
+            val badge=holder.rating?:return
+            val item=metadataItem(row)
+            val result=item?.let{this@MainActivity.metadata.peek(it,metadataLanguage)}
+            badge.text=if(result==null&&metadataStore.token!=null)getString(R.string.rating_loading) else ratingText(this@MainActivity,result?.primary,AppLanguage.locale(this@MainActivity))
+            androidx.core.view.ViewCompat.setStateDescription(holder.root,listOf(badge.text.toString(),
+                if(favoriteOf(row))getString(R.string.state_favorite) else "",progressLabel(row).first.orEmpty()).filter{it.isNotEmpty()}.joinToString(", "))
+        }
+        override fun onViewAttachedToWindow(holder:Holder){super.onViewAttachedToWindow(holder);if(holder.card){holder.row?.let{refreshRating(holder,it)};scheduleMetadata()}}
         override fun onBindViewHolder(holder:Holder,position:Int,payloads:MutableList<Any>){
             if(payloads.isNotEmpty()&&payloads.all{it==STATUS}){bindStatus(holder,rows[position]);return}
             onBindViewHolder(holder,position)
@@ -1736,7 +1927,25 @@ class MainActivity : ComponentActivity() {
 
 /** Determine the poster ratio during measurement, including the first grid layout.
  * Favourite star and progress bar are drawn here: no extra views per card while scrolling. */
+private class PosterCardLayout(context:android.content.Context):LinearLayout(context){
+    override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
+        val poster=getChildAt(0) as? PosterImageView
+        poster?.maxPosterHeight=Int.MAX_VALUE
+        super.onMeasure(widthMeasureSpec,heightMeasureSpec)
+        val list=parent as? RecyclerView?:return
+        val margins=layoutParams as? RecyclerView.LayoutParams
+        val available=list.height-list.paddingTop-list.paddingBottom-(margins?.topMargin?:0)-(margins?.bottomMargin?:0)
+        if(poster!=null&&available>TvUi.dp(context,100)&&measuredHeight>available){
+            // Reserve the actual measured text height, including translation/font growth.
+            // FIT_CENTER keeps the image itself at 2:3 inside the smaller poster area.
+            poster.maxPosterHeight=(poster.measuredHeight-(measuredHeight-available)).coerceAtLeast(TvUi.dp(context,32))
+            super.onMeasure(widthMeasureSpec,heightMeasureSpec)
+        }
+    }
+}
 private class PosterImageView(context:android.content.Context):ImageView(context){
+    var maxPosterHeight=Int.MAX_VALUE
+        set(value){if(field!=value){field=value;forceLayout()}}
     var favorite=false; set(value){if(field!=value){field=value;invalidate()}}
     /** Shows the outline star as a hint (and touch target) on the focused card. */
     var focusedCard=false; set(value){if(field!=value){field=value;invalidate()}}
@@ -1748,7 +1957,7 @@ private class PosterImageView(context:android.content.Context):ImageView(context
     private val starSize get()=TvUi.dp(context,22).toFloat()
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
         val width=View.MeasureSpec.getSize(widthMeasureSpec)
-        super.onMeasure(widthMeasureSpec,View.MeasureSpec.makeMeasureSpec((width*1.5f).toInt(),View.MeasureSpec.EXACTLY))
+        super.onMeasure(widthMeasureSpec,View.MeasureSpec.makeMeasureSpec(minOf((width*1.5f).toInt(),maxPosterHeight),View.MeasureSpec.EXACTLY))
     }
     override fun onDraw(canvas:android.graphics.Canvas){
         super.onDraw(canvas)

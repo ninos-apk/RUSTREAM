@@ -79,11 +79,15 @@ class ContentVisualTest {
                                         val grid=activity.findViewById<ViewGroup>(android.R.id.content).descendants.filterIsInstance<androidx.recyclerview.widget.RecyclerView>().first{it.layoutManager is androidx.recyclerview.widget.GridLayoutManager}
                                         val first=grid.getChildAt(0) as? ViewGroup
                                         val image=first?.getChildAt(0) as? android.widget.ImageView
-                                        ready=image!=null&&grid.descendants.filterIsInstance<android.widget.ImageView>().all{it.drawable is android.graphics.drawable.BitmapDrawable}&&kotlin.math.abs(image.height-image.width*1.5f)<2
+                                        ready=image!=null&&grid.descendants.filterIsInstance<android.widget.ImageView>().all{it.drawable is android.graphics.drawable.BitmapDrawable}&&image.height>0&&image.height<=image.width*1.5f+2
                                         if(ready){
-                                            val title=first!!.getChildAt(1);val bounds=Rect()
+                                            val drawable=image!!.drawable
+                                            val rendered=android.graphics.RectF(0f,0f,drawable.intrinsicWidth.toFloat(),drawable.intrinsicHeight.toFloat())
+                                            image.imageMatrix.mapRect(rendered)
+                                            assertEquals("Poster keeps its displayed 2:3 ratio",1.5f,rendered.height()/rendered.width(),0.01f)
+                                            val title=first!!.getChildAt(2);val bounds=Rect()
                                             assertTrue("Card title visible: $name",title.getGlobalVisibleRect(bounds))
-                                            assertEquals("Complete first card title: $name",title.height,bounds.height())
+                                            assertEquals("Complete first card title: $name (poster=${image.height}, card=${first.height}, grid=${grid.height})",title.height,bounds.height())
                                         }
                                     }
                                     if(!ready)SystemClock.sleep(40)

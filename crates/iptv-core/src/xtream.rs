@@ -4,6 +4,31 @@ use serde_json::Value;
 use std::collections::HashMap;
 use url::Url;
 
+fn metadata_attributes(stream: &Value) -> HashMap<String, String> {
+    let mut attributes: HashMap<String, String> = [
+        "tmdb_id",
+        "tmdb",
+        "rating",
+        "rating_5based",
+        "plot",
+        "genre",
+        "duration",
+        "releasedate",
+    ]
+    .iter()
+    .filter_map(|key| {
+        let value = &stream[*key];
+        let text = value
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| value.as_number().map(ToString::to_string))?;
+        Some(((*key).into(), text))
+    })
+    .collect();
+    attributes.insert("metadata_source".into(), "xtream".into());
+    attributes
+}
+
 pub fn parse(
     server: &str,
     username: &str,
@@ -119,6 +144,7 @@ pub fn parse(
                     url: url.to_string(),
                     tvg_id,
                     logo: artwork(stream),
+                    attributes: metadata_attributes(stream),
                     headers: StreamHeaders::default(),
                     is_live: kind == "live",
                     series_id: None,
@@ -284,6 +310,7 @@ pub fn build_manifest(
                     url: url.to_string(),
                     tvg_id,
                     logo: artwork(&stream),
+                    attributes: metadata_attributes(&stream),
                     headers: StreamHeaders::default(),
                     is_live: kind == ContentKind::LiveTv,
                     series_id: (kind == ContentKind::Series).then_some(stream_id),

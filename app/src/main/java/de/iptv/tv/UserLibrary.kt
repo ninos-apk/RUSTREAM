@@ -107,6 +107,12 @@ class UserLibrary(private val clock: () -> Long = System::currentTimeMillis) {
 
     /** Returns the new state. Series are favoured as a whole show by the caller passing the show key. */
     fun toggleFavorite(source: String, section: LibrarySection, key: String, name: String): Boolean {
+        return setFavorite(source, section, key, name, !isFavorite(source, section, key))
+    }
+
+    /** Idempotent desired state, independent of provider or TMDB identifiers. */
+    fun setFavorite(source: String, section: LibrarySection, key: String, name: String, desired: Boolean): Boolean {
+        if (isFavorite(source, section, key) == desired) return desired
         val data = data(source)
         val keys = data.favoriteKeys(section)
         val list = data.favorites(section)

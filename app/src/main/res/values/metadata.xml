@@ -1,0 +1,47 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="movie_favorite_on">In Favoriten</string>
+    <string name="movie_favorite_off">Nicht in Favoriten</string>
+    <string name="movie_details">Filmdetails</string>
+    <string name="movie_cast">Besetzung</string>
+    <string name="movie_trailer">Trailer öffnen</string>
+    <string name="movie_trailer_unavailable">Keine App zum Öffnen des Trailers verfügbar. Einen Browser oder YouTube installieren und erneut versuchen.</string>
+    <string name="movie_more_cast">Weitere Besetzung anzeigen</string>
+    <string name="movie_original_title">Originaltitel</string>
+    <string name="movie_release">Veröffentlichung</string>
+    <string name="movie_runtime">Laufzeit</string>
+    <!-- The abbreviation is identical for singular and plural. -->
+    <string name="movie_minutes" tools:ignore="PluralsCandidate">%1$d Min.</string>
+    <string name="movie_genres">Genres</string>
+    <string name="movie_director">Regie</string>
+    <string name="movie_writer">Drehbuch</string>
+    <string name="movie_countries">Produktionsländer</string>
+    <string name="movie_companies">Produktionsfirmen</string>
+    <string name="movie_language">Originalsprache</string>
+    <string name="movie_certification">Altersfreigabe</string>
+    <string name="movie_budget">Budget</string>
+    <string name="movie_revenue">Einspielergebnis</string>
+    <string name="rating_missing">Keine Bewertung verfügbar</string>
+    <string name="rating_unrated">Noch nicht bewertet</string>
+    <string name="rating_provider">Anbieter</string>
+    <string name="rating_votes">%1$s Stimmen</string>
+    <string name="rating_loading">Bewertung wird geladen …</string>
+    <string name="metadata_loading">Filmangaben werden geladen …</string>
+    <string name="metadata_retry">Erneut laden</string>
+    <string name="metadata_error">Filmangaben konnten nicht aktualisiert werden. Erneut laden; Abspielen und Favoriten bleiben verfügbar.</string>
+    <string name="metadata_token_missing">Anbieterangaben und verfügbare öffentliche Besetzungsfotos. Weitere TMDB-Filmangaben lassen sich unter Einstellungen → TMDB aktivieren.</string>
+    <string name="metadata_ambiguous">Zuordnung unklar. Mit „TMDB-Zuordnung ändern“ den passenden Titel wählen.</string>
+    <string name="metadata_unmapped">Kein eindeutiger Treffer. Mit „TMDB-Zuordnung ändern“ eine TMDB-ID eintragen.</string>
+    <string name="metadata_source">Filmangaben: TMDB und verfügbare Anbieterangaben.</string>
+    <string name="metadata_english_fallback">Beschreibung auf Englisch, da keine Übersetzung verfügbar ist.</string>
+    <string name="metadata_correct">TMDB-Zuordnung ändern</string>
+    <string name="metadata_id">TMDB-ID</string>
+    <string name="metadata_automatic">Automatisch zuordnen</string>
+    <string name="metadata_invalid_id">Eine positive TMDB-ID eingeben.</string>
+    <string name="metadata_save_failed">Speichern fehlgeschlagen. Bitte erneut versuchen.</string>
+    <string name="metadata_settings">TMDB</string>
+    <string name="metadata_token">TMDB API Read Access Token</string>
+    <string name="metadata_token_hint">Token eingeben oder leer speichern, um TMDB zu deaktivieren. Der Token wird verschlüsselt auf diesem Gerät gespeichert.</string>
+    <string name="metadata_saved">TMDB-Einstellung gespeichert</string>
+    <string name="metadata_invalid_token">Token ohne Leerzeichen eingeben (höchstens 4096 Zeichen).</string>
+    <string name="tmdb_attribution" translatable="false">This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+</resources>

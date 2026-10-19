@@ -43,6 +43,11 @@ pub enum Request {
         revision: u64,
         id: usize,
     },
+    /// Private metadata adapter input; never use the returned URL as a route or log it.
+    Metadata {
+        revision: u64,
+        id: usize,
+    },
     ResolveSeries {
         revision: u64,
         id: usize,
@@ -393,6 +398,32 @@ impl Engine {
                     show,
                     season,
                     unknown,
+                )
+            }
+            Request::Metadata { revision, id } => {
+                self.check_revision(revision)?;
+                let c = self.channel(id)?;
+                let fields = [
+                    "tmdb_id",
+                    "tmdb",
+                    "rating",
+                    "rating_5based",
+                    "plot",
+                    "genre",
+                    "duration",
+                    "releasedate",
+                ];
+                let attributes: serde_json::Map<String, Value> = fields
+                    .iter()
+                    .filter_map(|key| {
+                        c.attributes
+                            .get(*key)
+                            .map(|value| ((*key).into(), json!(value)))
+                    })
+                    .collect();
+                Ok(
+                    json!({"url":c.url,"series_id":c.series_id,"attributes":attributes,
+                    "provider_metadata":c.attributes.get("metadata_source").is_some_and(|v|v=="xtream")}),
                 )
             }
             Request::Entry { revision, id } => {
