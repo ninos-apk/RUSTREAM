@@ -74,6 +74,16 @@ class MainActivity : ComponentActivity() {
     private lateinit var playerPane: PlayerPane
     private lateinit var details: ConnectionDetails
     private lateinit var settingsButton: TvIconButton
+    private lateinit var updateButton: TvIconButton
+    private lateinit var updates: UpdateController
+    private var updateDialog: UpdateDialog? = null
+    private val updatePermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) {
+        if (::updates.isInitialized) {
+            if (UpdateInstaller.permitted(this)) {
+                if (updates.state.phase == UpdatePhase.READY) updates.install() else updates.download()
+            } else updates.permissionDenied()
+        }
+    }
     private lateinit var resultCount: TextView
     private lateinit var listFooter:LinearLayout
     private lateinit var startup: StartupPane
@@ -211,6 +221,11 @@ class MainActivity : ComponentActivity() {
             setContentView(TextView(this).apply { setText(R.string.core_missing); textSize = 24f; setPadding(48,48,48,48) }); return
         }
         buildUi()
+        updates = UpdateController(this, scope, { state ->
+            updateButton.notification = state.release != null
+            updateButton.contentDescription = state.release?.let { getString(R.string.updates_badge, it.versionName) } ?: getString(R.string.updates_title)
+            updateDialog?.takeIf { it.isShowing }?.render(state)
+        }, { intent -> startActivity(intent) })
         loader.progress = { state -> scope.launch { if(busy) {
             val message=getString(state.message)
             if(status.text.toString()!=message)status.text=message
@@ -287,7 +302,10 @@ class MainActivity : ComponentActivity() {
         }
         toolbar.addView(HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;addView(tabs)},LinearLayout.LayoutParams(0,-2,1f))
         settingsButton = TvIconButton(this,"settings",getString(R.string.settings)) { settingsDialog() }.apply { id = View.generateViewId() }
+        updateButton = TvIconButton(this,"notifications",getString(R.string.updates_title)) { showUpdates() }.apply { id = View.generateViewId() }
+        toolbar.addView(updateButton,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginEnd=dp(8) })
         toolbar.addView(settingsButton,LinearLayout.LayoutParams(dp(36),dp(36)))
+        updateButton.nextFocusRightId=settingsButton.id; settingsButton.nextFocusLeftId=updateButton.id
         chrome.addView(toolbar,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         val body = LinearLayout(this)
         sidebar = LinearLayout(this)
@@ -408,6 +426,13 @@ class MainActivity : ComponentActivity() {
                     if(mediaColumn.isShown) { playerPane.hideControls(); video.requestFocus() } else channelSearch.requestFocus()
                 }
                 true
+            } else false
+        }
+        updateButton.setOnKeyListener { _, key, event ->
+            if(key==KeyEvent.KEYCODE_DPAD_DOWN) {
+                if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0) {
+                    if(mediaColumn.isShown) { playerPane.hideControls(); video.requestFocus() } else channelSearch.requestFocus()
+                }; true
             } else false
         }
         status.nextFocusUpId=video.id; status.nextFocusDownId=epg.id
@@ -568,7 +593,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun settingsDialog() {
         val choices=listOf(R.string.settings_sources,R.string.settings_add_file,R.string.settings_add_url,R.string.settings_xtream,R.string.settings_epg,R.string.settings_picture,
-            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info,R.string.metadata_settings).map { getString(it) }
+            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info,R.string.metadata_settings,R.string.updates_title).map { getString(it) }
         val dialog=AlertDialog.Builder(this).create()
         val menu=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
@@ -579,7 +604,7 @@ class MainActivity : ComponentActivity() {
         val actions=choices.mapIndexed { index,choice ->
             button(choice) {
                     dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog();11->metadataSettings() }
+                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog();11->metadataSettings();12->showUpdates() }
             }.apply {
                 menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
             }
@@ -1108,6 +1133,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
+        if (::updates.isInitialized) updates.start()
         if(::channels.isInitialized)channels.post{scheduleMetadata()}
         detailRow?.let{row->metadataItem(row)?.let{loadMovieDetails(it,row)}}
         if (::artwork.isInitialized) artwork.setActive(true)
@@ -1126,6 +1152,7 @@ class MainActivity : ComponentActivity() {
         if (first.requestFocus()) firstChannelFocus = false
     }
     override fun onStop() {
+        if (::updates.isInitialized) updates.stop()
         metadataWork?.cancel();detailWork?.cancel()
         if (::playerPane.isInitialized) playerPane.cancelSeek()
         // Downloads already running finish into the caches; nothing new starts in the background.
@@ -1138,6 +1165,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        updateDialog?.dismiss()
+        if (::updates.isInitialized) updates.close()
         movieDetailsView?.dispose()
         if(::metadataStore.isInitialized)metadataStore.close()
         if (::playback.isInitialized) { playback.release(); if (userLibraryLoaded) libraryStore.flush(userLibrary) }
@@ -1146,6 +1175,19 @@ class MainActivity : ComponentActivity() {
         if (::loader.isInitialized) loader.close()
         if (::core.isInitialized) core.close()
         super.onDestroy()
+    }
+
+    private fun showUpdates() {
+        if (!::updates.isInitialized || updateDialog?.isShowing == true) return
+        updateDialog = UpdateDialog(this, updates, currentFocus ?: updateButton) {
+            try {
+                val permissionIntent = if (android.os.Build.VERSION.SDK_INT >= 26)
+                    Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:$packageName"))
+                else Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
+                updatePermission.launch(permissionIntent)
+            } catch (_: android.content.ActivityNotFoundException) { updates.permissionDenied() }
+        }.also { it.show() }
+        updates.check(false)
     }
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)

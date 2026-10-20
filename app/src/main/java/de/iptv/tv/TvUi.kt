@@ -157,6 +157,8 @@ class StarBadge(context: Context) : View(context) {
 }
 
 class TvIconButton(context: Context, var symbol: String, description: String, action: () -> Unit) : View(context) {
+    var notification = false
+        set(value) { if (field != value) { field = value; invalidate() } }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val iconPath = Path()
     private val iconBounds = RectF()
@@ -216,6 +218,16 @@ class TvIconButton(context: Context, var symbol: String, description: String, ac
                 // Outline when not a favourite, filled accent when active: the state reads at a glance.
                 if (symbol == "star_on") { paint.style = Paint.Style.FILL; if (isEnabled) paint.color = TvUi.accent }
                 canvas.drawPath(TvUi.starPath(iconPath, 12f, 12.6f, 9.6f, 4.1f), paint)
+            }
+            "notifications" -> {
+                canvas.drawPath(iconPath.apply { reset(); moveTo(5f,17f); lineTo(7f,14f); lineTo(7f,9f)
+                    cubicTo(7f,2f,17f,2f,17f,9f); lineTo(17f,14f); lineTo(19f,17f); close() },paint)
+                canvas.drawArc(10f,17f,14f,21f,0f,180f,false,paint)
+                if (notification) {
+                    paint.style = Paint.Style.FILL; paint.color = 0xFFFF6464.toInt(); canvas.drawCircle(19f,5f,4.3f,paint)
+                    paint.color = TvUi.background; paint.textSize = 7f; paint.typeface = Typeface.DEFAULT_BOLD; paint.textAlign = Paint.Align.CENTER
+                    canvas.drawText("!",19f,5f-(paint.descent()+paint.ascent())/2,paint)
+                }
             }
             "settings" -> {
                 canvas.drawCircle(12f,12f,6f,paint); canvas.drawCircle(12f,12f,2.2f,paint)

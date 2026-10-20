@@ -1,5 +1,7 @@
 # Tagged development APKs
 
+**From 0.5.8:** releases also ship signed `update.json` / `update.json.sig` assets for the in-app TV updater. Reviewed bilingual notes are required, version names/codes must increase and tag commits must belong to `main`. See [App updates](APP_UPDATES.md) for the current contract, signing configuration, note generation and acceptance tests. The existing development signer remains the default; an optional permanent release signer is supported. The workflow uploads a draft before publishing all assets together.
+
 Pushing a version tag or starting a manual check triggers `.github/workflows/tagged-apk.yml`. Normal pushes to `main` do not publish anything and do not increment versions automatically. Every tagged build checks out that exact commit, runs the Rust/JVM checks and Android lint, builds all three Android ABIs, signs an optimized APK and attaches it plus its SHA-256 checksum to a GitHub **prerelease**. Development builds are not marked Latest and are not submitted to an app store.
 
 ## Check on GitHub before releasing
