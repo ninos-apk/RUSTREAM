@@ -25,7 +25,7 @@ class IngressMeter {
 data class PlaybackStats(
     val phase: String = "idle",
     val bufferedMs: Long? = null,
-    val bufferTargetMs: Int = 3_000,
+    val bufferTargetMs: Int = PlaybackBufferProfile.BALANCED.targetMs,
     val ingressBytesPerSecond: Long? = null,
     val allocatedBytes: Int? = null,
     val positionMs: Long = 0,

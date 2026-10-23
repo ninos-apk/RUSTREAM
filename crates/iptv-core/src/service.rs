@@ -141,6 +141,7 @@ pub enum Request {
         buffering: bool,
         cache_end: Option<f64>,
         ingress: Option<u64>,
+        video_frames: Option<u64>,
         paused: bool,
     },
     Ended {
@@ -630,6 +631,7 @@ impl Engine {
                 buffering,
                 cache_end,
                 ingress,
+                video_frames,
                 paused,
             } => {
                 if attempt != self.attempt {
@@ -644,6 +646,7 @@ impl Engine {
                     now,
                     &Telemetry {
                         position_seconds: position,
+                        video_frames,
                         buffered_seconds: buffered,
                         paused_for_cache: buffering,
                         cache_end_seconds: cache_end,
@@ -833,7 +836,7 @@ impl Engine {
             Phase::Waiting { .. } => "waiting",
             Phase::Finished => "finished",
         };
-        json!({"action":"none", "phase": phase, "attempt":self.attempt, "retries":self.recovery.attempts, "recoveries":self.recovery.recoveries})
+        json!({"action":"none", "phase": phase, "attempt":self.attempt, "retries":self.recovery.attempts, "recoveries":self.recovery.recoveries, "recovery_reason":self.recovery.last_reason})
     }
     fn status_at(&self, now: Duration) -> Value {
         let mut status = self.status();

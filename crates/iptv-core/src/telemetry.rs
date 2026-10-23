@@ -4,6 +4,9 @@ use serde_json::Value;
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Telemetry {
     pub position_seconds: Option<f64>,
+    /// Submitted video frames also prove progress when a sliding live window keeps
+    /// its relative playback position unchanged.
+    pub video_frames: Option<u64>,
     pub buffered_seconds: Option<f64>,
     pub forward_bytes: Option<u64>,
     pub input_bytes_per_second: Option<u64>,

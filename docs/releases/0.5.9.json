@@ -1,0 +1,20 @@
+{
+  "version": "0.5.9",
+  "reviewed": true,
+  "de": [
+    "Die Live-Pufferprofile Sport, Balance und Stabil bieten jetzt 5, 10 und 20 Sekunden Reserve. Benutzerdefinierte Profile werden automatisch übernommen.",
+    "Kurze Ladefehler werden zunächst innerhalb der laufenden Wiedergabe wiederholt, damit vorhandener Puffer weiter genutzt werden kann.",
+    "Festhängende Live-Streams und ausbleibende Videobilder werden überwacht und die Verbindung bei behebbaren Problemen automatisch neu aufgebaut.",
+    "Vorübergehend nicht verfügbare Live-Kanäle werden erneut versucht, ohne dass du den Kanal wechseln musst.",
+    "Der Diagnosebericht zeigt die Gründe automatischer Wiederverbindungen und ob die Wiedergabe danach wieder läuft.",
+    "Verbesserte Anfangs- und Zurück-Funktionen, beschleunigtes Spulen beim Halten sowie zuverlässigeres Nachladen bei Filmen und Serien."
+  ],
+  "en": [
+    "The Sport, Balance and Stable live buffer profiles now target 5, 10 and 20 seconds. Existing custom profiles are migrated automatically.",
+    "Brief loading failures are retried within the current playback session so existing buffered media can keep playing.",
+    "Stuck live streams and missing video frame output are monitored, with automatic reconnection for recoverable problems.",
+    "Temporarily unavailable live channels are retried without requiring a channel change.",
+    "Diagnostics show why automatic reconnections occurred and whether playback recovered.",
+    "Improved restart and previous-episode controls, faster seeking when holding buttons, and more reliable refilling for movies and series."
+  ]
+}

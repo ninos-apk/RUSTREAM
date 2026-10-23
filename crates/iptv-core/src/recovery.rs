@@ -8,6 +8,8 @@ pub struct RecoveryPolicy {
     pub stall_timeout: Duration,
     pub refill_timeout: Duration,
     pub refill_max_wait: Duration,
+    pub live_refill_timeout: Duration,
+    pub live_refill_max_wait: Duration,
     pub stable_reset: Duration,
     pub retry_base: Duration,
     pub retry_max: Duration,
@@ -19,6 +21,8 @@ impl Default for RecoveryPolicy {
             stall_timeout: Duration::from_secs(12),
             refill_timeout: Duration::from_secs(20),
             refill_max_wait: Duration::from_secs(90),
+            live_refill_timeout: Duration::from_secs(12),
+            live_refill_max_wait: Duration::from_secs(30),
             stable_reset: Duration::from_secs(30),
             retry_base: Duration::from_secs(1),
             retry_max: Duration::from_secs(20),
@@ -48,6 +52,7 @@ pub enum RecoveryReason {
     StartupTimeout,
     PlaybackStalled,
     RefillNoIngress,
+    RefillNoProgress,
     RefillDeadline,
     BackendError,
     LiveEof,
@@ -69,11 +74,14 @@ pub struct Recovery {
     started: Duration,
     last_progress: Duration,
     last_ingress: Duration,
+    last_refill_progress: Duration,
     healthy_since: Option<Duration>,
     buffering_since: Option<Duration>,
     last_sample_position: Option<f64>,
     previous_cache_end: Option<f64>,
     previous_forward_bytes: Option<u64>,
+    previous_buffered: Option<f64>,
+    previous_video_frames: Option<u64>,
     paused: bool,
 }
 impl Recovery {
@@ -91,11 +99,14 @@ impl Recovery {
             started: Duration::ZERO,
             last_progress: Duration::ZERO,
             last_ingress: Duration::ZERO,
+            last_refill_progress: Duration::ZERO,
             healthy_since: None,
             buffering_since: None,
             last_sample_position: None,
             previous_cache_end: None,
             previous_forward_bytes: None,
+            previous_buffered: None,
+            previous_video_frames: None,
             paused: false,
         }
     }
@@ -116,11 +127,14 @@ impl Recovery {
         self.started = now;
         self.last_progress = now;
         self.last_ingress = now;
+        self.last_refill_progress = now;
         self.healthy_since = None;
         self.buffering_since = None;
         self.last_sample_position = None;
         self.previous_cache_end = None;
         self.previous_forward_bytes = None;
+        self.previous_buffered = None;
+        self.previous_video_frames = None;
     }
     pub fn stop(&mut self) {
         self.generation = self.generation.wrapping_add(1);
@@ -132,6 +146,7 @@ impl Recovery {
     pub fn seek(&mut self, now: Duration) {
         self.last_progress = now;
         self.last_ingress = now;
+        self.last_refill_progress = now;
         self.healthy_since = None;
         self.buffering_since = None;
     }
@@ -190,12 +205,29 @@ impl Recovery {
         if input {
             self.last_ingress = now;
         }
+        // Raw bytes (including manifests or unusable media) are not proof that a live
+        // refill is succeeding. Require growth of playable media when reported.
+        let buffered = sample.buffered_seconds.filter(|value| value.is_finite());
+        let refill_progress = buffered
+            .zip(self.previous_buffered)
+            .is_some_and(|(value, old)| value > old + 0.02)
+            || (buffered.is_none() && input);
+        if refill_progress {
+            self.last_refill_progress = now;
+        }
+        self.previous_buffered = buffered;
         self.previous_cache_end = sample.cache_end_seconds;
         self.previous_forward_bytes = sample.forward_bytes;
         let position = sample.position_seconds.filter(|value| value.is_finite());
-        let advanced = position
-            .zip(self.last_sample_position)
-            .is_some_and(|(value, old)| value > old + 0.02);
+        let video_advanced = sample
+            .video_frames
+            .zip(self.previous_video_frames)
+            .is_some_and(|(frames, previous)| frames > previous);
+        self.previous_video_frames = sample.video_frames;
+        let advanced = video_advanced
+            || position
+                .zip(self.last_sample_position)
+                .is_some_and(|(value, old)| value > old + 0.02);
         // A first sample is a baseline, not evidence of movement. Timestamp
         // resets must establish a new baseline rather than masquerade as progress.
         if self.last_sample_position.is_none()
@@ -216,7 +248,10 @@ impl Recovery {
             }
         }
         if sample.paused_for_cache {
-            self.buffering_since.get_or_insert(now);
+            if self.buffering_since.is_none() {
+                self.buffering_since = Some(now);
+                self.last_refill_progress = now;
+            }
             self.phase = Phase::Buffering;
             self.healthy_since = None;
         } else if advanced {
@@ -275,19 +310,41 @@ impl Recovery {
             }
             Phase::Buffering => {
                 let since = self.buffering_since.unwrap_or(self.started);
-                if now.saturating_sub(since) >= self.policy.refill_max_wait {
+                let max_wait = if self.is_live {
+                    self.policy.live_refill_max_wait
+                } else {
+                    self.policy.refill_max_wait
+                };
+                let progress_timeout = if self.has_played {
+                    self.policy.live_refill_timeout
+                } else {
+                    self.policy.startup_timeout
+                };
+                if now.saturating_sub(since) >= max_wait {
                     self.schedule(now, RecoveryReason::RefillDeadline);
                 } else if now.saturating_sub(self.last_ingress.max(self.last_progress))
-                    >= self.policy.refill_timeout
+                    >= if self.is_live {
+                        progress_timeout
+                    } else {
+                        self.policy.refill_timeout
+                    }
                 {
                     self.schedule(now, RecoveryReason::RefillNoIngress);
+                } else if self.is_live
+                    && now.saturating_sub(self.last_refill_progress) >= progress_timeout
+                {
+                    self.schedule(now, RecoveryReason::RefillNoProgress);
                 }
             }
             Phase::Connecting if !self.has_played => {
                 let active_refill = self.last_ingress > self.started
                     && now.saturating_sub(self.last_ingress) < self.policy.refill_timeout;
                 let timeout = if active_refill {
-                    self.policy.refill_max_wait.max(self.policy.startup_timeout)
+                    if self.is_live {
+                        self.policy.live_refill_max_wait
+                    } else {
+                        self.policy.refill_max_wait.max(self.policy.startup_timeout)
+                    }
                 } else {
                     self.policy.startup_timeout
                 };

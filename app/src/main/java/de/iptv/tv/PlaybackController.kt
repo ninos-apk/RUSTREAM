@@ -16,9 +16,8 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
-import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
@@ -30,6 +29,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import org.json.JSONArray
+import java.util.concurrent.atomic.AtomicLong
 
 /** All Media3 calls stay on the main looper. Rust exclusively owns session-level retries. */
 class PlaybackController(
@@ -57,8 +58,14 @@ class PlaybackController(
     private var allocator: DefaultAllocator? = null
     private var ingress = IngressMeter()
     private val refillWatchdog = VodRefillWatchdog()
+    private val videoWatchdog = LiveVideoWatchdog()
+    private var videoFrames = AtomicLong()
+    private val recoveryEvents = ArrayDeque<JSONObject>()
+    private var lastCoreHealth = JSONObject()
+    private var lastIngressRate: Long? = null
+    private var recoveryPending = false
     private var live = false
-    private var bufferTargetMs = 3_000
+    private var bufferTargetMs = PlaybackBufferProfile.BALANCED.targetMs
     /** Increments per selection; the player created for it reports samples under this token. */
     private var selection = 0L
     private var playerSelection = 0L
@@ -70,6 +77,9 @@ class PlaybackController(
         val command = core.call("select", "revision" to revision, "id" to id, "resume" to resumeSec)
         selected = true; terminal = false; userPaused = false
         lastError=null
+        recoveryEvents.clear()
+        lastCoreHealth = JSONObject()
+        recoveryPending = false
         val token = ++selection
         apply(command)
         token
@@ -88,12 +98,23 @@ class PlaybackController(
                             // Unknown throughput stays null. Cache-end advances are genuine ingress evidence.
                             val suspended = !current.playWhenReady || current.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE
                             userPaused = !current.playWhenReady
-                            val rate = ingress.sample(SystemClock.elapsedRealtime())
+                            val now = SystemClock.elapsedRealtime()
+                            val rate = ingress.sample(now)
+                            lastIngressRate = rate
+                            val frames = videoFrames.get()
                             apply(core.call("poll", "attempt" to attempt, "paused" to suspended,
                                 "position" to current.currentPosition.coerceAtLeast(0) / 1000.0,
                                 "buffered" to current.totalBufferedDuration.coerceAtLeast(0) / 1000.0,
                                 "cache_end" to current.bufferedPosition.coerceAtLeast(0) / 1000.0,
-                                "buffering" to (current.playbackState == Player.STATE_BUFFERING), "ingress" to rate))
+                                "buffering" to (current.playbackState == Player.STATE_BUFFERING), "ingress" to rate,
+                                "video_frames" to frames.takeIf { live && current.videoFormat != null }))
+                            if (player === current && videoWatchdog.shouldRetry(now,
+                                    active = live && !suspended && phase == "playing" && current.isPlaying &&
+                                        current.videoFormat != null && view.isShown,
+                                    frames = frames)) {
+                                recordRecovery("video_frame_stall", rate)
+                                apply(core.call("ended", "attempt" to attempt, "error" to true))
+                            }
                             if (player === current && refillWatchdog.shouldRetry(
                                     SystemClock.elapsedRealtime(),
                                     active = !live && !suspended && phase in setOf("playing", "buffering"),
@@ -177,11 +198,20 @@ class PlaybackController(
     private suspend fun apply(command: JSONObject) {
         if (command.optString("action") != "load") {
             val previousPhase = phase
+            lastCoreHealth = command
             phase = command.optString("phase", phase)
             if (phase == "waiting") {
-                if (previousPhase != "waiting") player?.stop()
+                if (previousPhase != "waiting") {
+                    recordRecovery(command.optString("recovery_reason", "unknown"))
+                    recoveryPending = true
+                    player?.stop()
+                }
                 scheduleRetry(command)
             } else cancelRetry()
+            if (phase == "playing" && recoveryPending) {
+                recordRecovery("recovered")
+                recoveryPending = false
+            }
             if (phase == "finished") { terminal = true }
             val label = when (phase) {
                 "playing" -> context.getString(R.string.playback_playing)
@@ -203,6 +233,7 @@ class PlaybackController(
         phase = "connecting"
         live = command.getBoolean("live")
         ingress = IngressMeter().apply { sample(SystemClock.elapsedRealtime()) }
+        lastIngressRate = null
         val http = DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(15_000)
             .setAllowCrossProtocolRedirects(false).setUserAgent(command.optString("user_agent", "IPTV-TV/0.1"))
         if (!command.isNull("referrer")) http.setDefaultRequestProperties(mapOf("Referer" to command.getString("referrer")))
@@ -214,9 +245,7 @@ class PlaybackController(
             override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
         })
         val media = DefaultMediaSourceFactory(context).setDataSourceFactory(data)
-            .setLoadErrorHandlingPolicy(object : DefaultLoadErrorHandlingPolicy(0) {
-                override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo) = C.TIME_UNSET
-            })
+            .setLoadErrorHandlingPolicy(PlaybackLoadErrorPolicy(live))
         val mediaAllocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
         allocator = mediaAllocator
         val buffers = bufferProfile.buffers(live)
@@ -226,11 +255,15 @@ class PlaybackController(
             .setTargetBufferBytes(buffers.bytes)
             // VOD must keep loading below 60 seconds even at the byte target.
             .setPrioritizeTimeOverSizeThresholds(!live).build()
-        val p = ExoPlayer.Builder(context).setMediaSourceFactory(media).setLoadControl(loadControl)
+        val p = ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+            .setMediaSourceFactory(media).setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
             .setHandleAudioBecomingNoisy(true).build()
         player = p
         playerSelection = selection
+        val frameCounter = AtomicLong()
+        videoFrames = frameCounter
+        p.setVideoFrameMetadataListener { _, _, _, _ -> frameCounter.incrementAndGet() }
         p.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== p || attempt != token) return
@@ -244,7 +277,7 @@ class PlaybackController(
                 }
                 lastError=detail.json().put("media3_code",error.errorCode).put("cause_types",org.json.JSONArray(generateSequence(error as Throwable){it.cause}.take(12).map{it.javaClass.simpleName}.toList()))
                 // Permanent errors need user action, rather than an endless credential/codec retry loop.
-                if (httpCode in setOf(401, 403, 404, 410) || error.errorCode in setOf(PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED, PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED)) {
+                if (PlaybackRecoveryPolicy.terminal(live, httpCode, error.errorCode)) {
                     terminal = true
                     phase = "error"
                     scope.launch { operations.withLock { if (player === p && attempt == token) core.call("pause", "paused" to true) } }
@@ -305,6 +338,18 @@ class PlaybackController(
             format = if (format != null && format.width > 0 && format.height > 0) "${format.width} × ${format.height}" else "",
         ))
     }
+    /** Bounded, credential-free snapshots for distinguishing transport and renderer stalls. */
+    private fun recordRecovery(reason: String, rate: Long? = lastIngressRate) {
+        val current = player
+        recoveryEvents.addLast(JSONObject().put("reason", reason).put("attempt", attempt)
+            .put("elapsed_ms", SystemClock.elapsedRealtime()).put("buffered_ms", current?.totalBufferedDuration)
+            .put("player_state", current?.playbackState).put("position_ms", current?.currentPosition)
+            .put("received_bytes", ingress.totalBytes).put("ingress_bytes_per_second", rate)
+            .put("video_frames", videoFrames.get()).put("media3_code", lastError?.optInt("media3_code")))
+        while (recoveryEvents.size > 20) recoveryEvents.removeFirst()
+    }
+    fun diagnostics(): JSONObject = JSONObject().put("profile", bufferProfile.key).put("live", live)
+        .put("phase", phase).put("core", lastCoreHealth).put("recoveries", JSONArray(recoveryEvents.toList()))
     /** Position and duration come from Media3 only; the observer never sees a recycled player. */
     private fun sample(p: ExoPlayer, event: PlaybackSample.Event) {
         val duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 && !live }
@@ -317,6 +362,7 @@ class PlaybackController(
     }
     fun releasePlayer() {
         refillWatchdog.reset()
+        videoWatchdog.reset()
         cancelRetry()
         // Last position of this player, still under the token of the selection that created it.
         player?.let { sample(it, PlaybackSample.Event.RELEASE) }

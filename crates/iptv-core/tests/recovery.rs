@@ -222,10 +222,10 @@ fn first_healthy_live_eof_is_quick_but_repeated_eof_backs_off() {
 }
 
 #[test]
-fn slow_but_progressing_refill_survives_the_old_twelve_second_watchdog() {
+fn slow_but_progressing_vod_refill_survives_the_live_watchdog() {
     use iptv_core::telemetry::Telemetry;
     let mut recovery = Recovery::new(RecoveryPolicy::default());
-    let generation = recovery.select(sec(0), true);
+    let generation = recovery.select(sec(0), false);
     recovery.sample(generation, sec(1), Some(1.0), false);
     for second in 2..50 {
         recovery.observe(
@@ -248,10 +248,10 @@ fn slow_but_progressing_refill_survives_the_old_twelve_second_watchdog() {
 }
 
 #[test]
-fn progressing_refill_still_has_a_hard_deadline() {
+fn progressing_vod_refill_still_has_a_hard_deadline() {
     use iptv_core::{recovery::RecoveryReason, telemetry::Telemetry};
     let mut recovery = Recovery::new(RecoveryPolicy::default());
-    let generation = recovery.select(sec(0), true);
+    let generation = recovery.select(sec(0), false);
     recovery.sample(generation, sec(1), Some(1.0), false);
     for second in 2..=92 {
         recovery.observe(
@@ -275,11 +275,12 @@ fn refill_without_any_ingress_reconnects_with_an_explicit_reason() {
     use iptv_core::recovery::RecoveryReason;
     let mut recovery = Recovery::new(RecoveryPolicy::default());
     let generation = recovery.select(sec(0), true);
+    recovery.sample(generation, sec(0), Some(0.0), false);
     recovery.sample(generation, sec(1), Some(1.0), false);
     recovery.sample(generation, sec(2), Some(1.0), true);
-    recovery.tick(sec(14));
+    recovery.tick(sec(12));
     assert_eq!(recovery.phase, Phase::Buffering);
-    recovery.tick(sec(22));
+    recovery.tick(sec(14));
     assert!(matches!(recovery.phase, Phase::Waiting { .. }));
     assert_eq!(recovery.last_reason, Some(RecoveryReason::RefillNoIngress));
 }
@@ -295,5 +296,114 @@ fn retained_vod_position_does_not_shorten_new_load_startup_timeout() {
     assert_eq!(recovery.phase, Phase::Connecting);
     assert_eq!(recovery.resume_position(), Some(1234.0));
     recovery.tick(sec(30));
+    assert!(matches!(recovery.phase, Phase::Waiting { .. }));
+}
+
+#[test]
+fn live_bytes_without_playable_progress_cannot_hide_a_stuck_refill() {
+    use iptv_core::{recovery::RecoveryReason, telemetry::Telemetry};
+    let mut recovery = Recovery::new(RecoveryPolicy::default());
+    let generation = recovery.select(sec(0), true);
+    recovery.sample(generation, sec(0), Some(0.0), false);
+    recovery.sample(generation, sec(1), Some(1.0), false);
+    for second in 2..=14 {
+        recovery.observe(
+            generation,
+            sec(second),
+            &Telemetry {
+                position_seconds: Some(1.0),
+                buffered_seconds: Some(0.0),
+                paused_for_cache: true,
+                input_bytes_per_second: Some(10_000),
+                cache_end_seconds: Some(second as f64),
+                ..Default::default()
+            },
+        );
+        recovery.tick(sec(second));
+        if second < 14 {
+            assert_eq!(recovery.phase, Phase::Buffering);
+        }
+    }
+    assert!(matches!(recovery.phase, Phase::Waiting { .. }));
+    assert_eq!(recovery.last_reason, Some(RecoveryReason::RefillNoProgress));
+    assert_eq!(recovery.tick(sec(16)), Action::Reload);
+    assert_eq!(recovery.resume_position(), None);
+}
+
+#[test]
+fn live_playable_growth_extends_refill_but_never_beyond_thirty_seconds() {
+    use iptv_core::{recovery::RecoveryReason, telemetry::Telemetry};
+    let mut recovery = Recovery::new(RecoveryPolicy::default());
+    let generation = recovery.select(sec(0), true);
+    recovery.sample(generation, sec(0), Some(0.0), false);
+    recovery.sample(generation, sec(1), Some(1.0), false);
+    for second in 2..=32 {
+        recovery.observe(
+            generation,
+            sec(second),
+            &Telemetry {
+                position_seconds: Some(1.0),
+                buffered_seconds: Some(second as f64 / 10.0),
+                paused_for_cache: true,
+                input_bytes_per_second: Some(10_000),
+                ..Default::default()
+            },
+        );
+        recovery.tick(sec(second));
+        if second < 32 {
+            assert_eq!(recovery.phase, Phase::Buffering);
+        }
+    }
+    assert!(matches!(recovery.phase, Phase::Waiting { .. }));
+    assert_eq!(recovery.last_reason, Some(RecoveryReason::RefillDeadline));
+}
+
+#[test]
+fn startup_buffering_has_grace_but_is_bounded_despite_continuing_bytes() {
+    use iptv_core::{recovery::RecoveryReason, telemetry::Telemetry};
+    let mut recovery = Recovery::new(RecoveryPolicy::default());
+    let generation = recovery.select(sec(0), true);
+    for second in 0..=25 {
+        recovery.observe(
+            generation,
+            sec(second),
+            &Telemetry {
+                position_seconds: Some(0.0),
+                buffered_seconds: Some(0.0),
+                paused_for_cache: true,
+                input_bytes_per_second: Some(1_000),
+                ..Default::default()
+            },
+        );
+        recovery.tick(sec(second));
+        if second < 25 {
+            assert_eq!(recovery.phase, Phase::Buffering);
+        }
+    }
+    assert_eq!(recovery.last_reason, Some(RecoveryReason::RefillNoProgress));
+    assert!(matches!(recovery.phase, Phase::Waiting { .. }));
+}
+
+#[test]
+fn live_frames_prove_progress_even_if_window_relative_position_is_constant() {
+    use iptv_core::telemetry::Telemetry;
+    let mut recovery = Recovery::new(RecoveryPolicy::default());
+    let generation = recovery.select(sec(0), true);
+    for second in 0..60 {
+        recovery.observe(
+            generation,
+            sec(second),
+            &Telemetry {
+                position_seconds: Some(10.0),
+                video_frames: Some(second * 25),
+                ..Default::default()
+            },
+        );
+        recovery.tick(sec(second));
+        assert!(!matches!(recovery.phase, Phase::Waiting { .. }));
+    }
+    assert_eq!(recovery.phase, Phase::Playing);
+    assert!(recovery.has_played);
+    recovery.tick(sec(71));
     assert!(matches!(recovery.phase, Phase::Waiting { .. }));
 }

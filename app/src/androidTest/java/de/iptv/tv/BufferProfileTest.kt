@@ -34,53 +34,54 @@ class BufferProfileTest {
     private fun field(activity: MainActivity, name: String) = MainActivity::class.java
         .getDeclaredField(name).apply { isAccessible = true }.get(activity)
 
-    @Test fun customLiveChoicesPersistAndBackDoesNotChangeSelection() {
+    @Test fun threeLiveChoicesPersistAndOldCustomChoiceMigrates() {
         val preferences = context.getSharedPreferences("MainActivity", Context.MODE_PRIVATE)
         val old = preferences.getString("liveBufferProfile", null)
-        preferences.edit().putString("liveBufferProfile", "balanced").commit()
+        preferences.edit().putString("liveBufferProfile", "custom_15").commit()
         try {
             withTvActivity { scenario ->
-                fun open() = scenario.onTvActivity { activity ->
-                    MainActivity::class.java.getDeclaredMethod("bufferDialog")
-                        .apply { isAccessible = true }.invoke(activity)
+                fun open() {
+                    var selectedLabel = ""
+                    scenario.onTvActivity { activity ->
+                        selectedLabel = activity.getString((field(activity, "playback") as PlaybackController).bufferProfile.label)
+                        MainActivity::class.java.getDeclaredMethod("bufferDialog")
+                            .apply { isAccessible = true }.invoke(activity)
+                    }
+                    assertTrue(device.wait(Until.hasObject(By.text(selectedLabel).selected(true)), 5_000))
                 }
                 fun choose(text: String) {
                     // Native single-choice lists keep input focus on the ListView, with a selected row.
                     assertTrue("Selected row: $text", device.wait(Until.hasObject(By.text(text).selected(true)), 5_000))
                     device.pressDPadCenter()
                 }
+                assertEquals("stable", preferences.getString("liveBufferProfile", null))
                 open()
-                assertTrue(device.wait(Until.hasObject(By.text("Ausgewogen · 3 s / 32 MiB").selected(true)), 5_000))
-                device.pressDPadDown(); device.pressDPadDown()
-                choose("Benutzerdefiniert …")
-                for ((index, seconds) in listOf(10, 15, 20).withIndex()) {
-                    if (index > 0) {
-                        open()
-                        choose("Benutzerdefiniert · ${seconds - 5} s")
-                        device.pressDPadDown()
-                    }
-                    choose("$seconds s / ${seconds * 6} MB")
-                    assertEquals("custom_$seconds", preferences.getString("liveBufferProfile", null))
+                assertTrue(device.wait(Until.hasObject(By.text("Stabil · 20 s / 64 MiB").selected(true)), 5_000))
+                assertFalse(device.hasObject(By.textContains("Benutzerdefiniert")))
+                device.pressDPadUp(); device.pressDPadUp()
+                for ((index, profile) in PlaybackBufferProfile.entries.withIndex()) {
+                    if (index > 0) { open(); device.pressDPadDown() }
+                    var label = ""
+                    scenario.onTvActivity { label = it.getString(profile.label) }
+                    choose(label)
+                    assertEquals(profile.key, preferences.getString("liveBufferProfile", null))
                     scenario.onTvActivity {
                         val controller = field(it, "playback") as PlaybackController
-                        assertEquals(seconds * 1_000, controller.bufferProfile.targetMs)
+                        assertEquals(profile, controller.bufferProfile)
                     }
                 }
                 scenario.recreate()
                 scenario.onTvActivity {
-                    assertEquals(PlaybackBufferProfile.CUSTOM_20, (field(it, "playback") as PlaybackController).bufferProfile)
+                    assertEquals(PlaybackBufferProfile.STABLE, (field(it, "playback") as PlaybackController).bufferProfile)
                 }
                 open()
-                choose("Benutzerdefiniert · 20 s")
-                assertTrue(device.wait(Until.hasObject(By.text("20 s / 120 MB").checked(true)), 5_000))
                 device.pressDPadUp()
                 device.pressBack()
-                assertTrue(device.wait(Until.hasObject(By.text("Benutzerdefiniert · 20 s").checked(true)), 5_000))
-                assertEquals("custom_20", preferences.getString("liveBufferProfile", null))
-                device.takeScreenshot(File("/sdcard/Download/buffer-profiles.png"))
-                device.pressDPadUp()
-                choose("Stabil · 6 s / 64 MiB")
                 assertEquals("stable", preferences.getString("liveBufferProfile", null))
+                open()
+                assertTrue(device.wait(Until.hasObject(By.text("Stabil · 20 s / 64 MiB").checked(true)), 5_000))
+                device.takeScreenshot(File("/sdcard/Download/buffer-profiles.png"))
+                device.pressBack()
             }
         } finally {
             preferences.edit().apply { if (old == null) remove("liveBufferProfile") else putString("liveBufferProfile", old) }.commit()
@@ -119,7 +120,7 @@ class BufferProfileTest {
                     }
                     runBlocking {
                         withContext(Dispatchers.Main) {
-                            playback.bufferProfile = PlaybackBufferProfile.CUSTOM_20
+                            playback.bufferProfile = PlaybackBufferProfile.STABLE
                             playback.start()
                             playback.select(revision, 0)
                         }

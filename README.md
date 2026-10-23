@@ -1,5 +1,7 @@
 # RUSTREAM IPTV PLAYER – Android TV / Google TV
 
+**Version 0.5.9 (23. Oktober 2026):** Sport/Balance/Stabil verwenden 5/10/20 Sekunden Pufferziel; die benutzerdefinierte Auswahl entfällt. Kurze Ladefehler werden lokal wiederholt, festhängende Live-Streams kontrolliert neu aufgebaut. Profile, Diagnose und Grenzen: [Live-Puffer und automatische Wiederherstellung](docs/LIVE_RECOVERY.md).
+
 **Wiedergabesteuerung (23. Oktober 2026):** Bei Filmen und Serien springt der Anfangsbutton zunächst auf 00:00; bei Serien öffnet erneutes Drücken innerhalb von 10 Sekunden die vorherige Episode. Die ±30-Sekunden-Buttons und Spultasten beschleunigen beim Halten. Unter 60 Sekunden VOD-Puffer erhält das Nachladen Vorrang vor dem Byteziel; bei ausbleibendem Datenfortschritt wird an der bisherigen Position erneut verbunden. Verhalten, Speicherbedarf und Prüfungen: [Wiedergabesteuerung und Nachladen](docs/PLAYBACK_CONTROLS.md).
 
 **Version 0.5.8 — App-Updates:** Eine Glocke neben den Einstellungen zeigt neuere vertrauenswürdige Entwicklungsversionen an. Änderungen lassen sich mit der Fernbedienung lesen; APK-Updates werden direkt heruntergeladen, geprüft und mit Android-Bestätigung installiert. Die erste Fassung mit Updater muss manuell installiert werden. Release-Vertrag, Signierung und Tests: [App-Updates](docs/APP_UPDATES.md).

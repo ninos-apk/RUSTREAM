@@ -32,13 +32,15 @@ class PlaybackBufferProfileTest {
             assertEquals(PlaybackBuffers(60_000, 120_000, 1_500, 3_000, 120_000_000), profile.buffers(false))
         }
     }
-    @Test fun customProfilesScaleTheirDataBudgetsWithoutDelayingStartup() {
-        val profiles = PlaybackBufferProfile.entries.filter { it.custom }
-        assertEquals(listOf(10_000, 15_000, 20_000), profiles.map { it.targetMs })
-        assertEquals(listOf(60_000_000, 90_000_000, 120_000_000), profiles.map { it.bytes })
-        assertTrue(profiles.all { it.startMs == 1_000 && it.rebufferMs == 2_000 })
-        assertEquals(listOf("sport", "balanced", "stable"),
-            PlaybackBufferProfile.entries.filterNot { it.custom }.map { it.key })
+    @Test fun threeProfilesProvideIncreasingReservesAndMigrateRemovedChoices() {
+        val profiles = PlaybackBufferProfile.entries
+        assertEquals(listOf(5_000, 10_000, 20_000), profiles.map { it.targetMs })
+        assertEquals(listOf(1_000, 1_500, 2_000), profiles.map { it.startMs })
+        assertEquals(listOf(2_000, 3_000, 5_000), profiles.map { it.rebufferMs })
+        assertEquals(listOf("sport", "balanced", "stable"), profiles.map { it.key })
+        assertEquals(PlaybackBufferProfile.BALANCED, PlaybackBufferProfile.fromKey("custom_10"))
+        assertEquals(PlaybackBufferProfile.STABLE, PlaybackBufferProfile.fromKey("custom_15"))
+        assertEquals(PlaybackBufferProfile.STABLE, PlaybackBufferProfile.fromKey("custom_20"))
     }
     @Test fun vodRefillsBelowOneMinuteEvenAtTheByteTarget() {
         val buffers = PlaybackBufferProfile.BALANCED.buffers(false)

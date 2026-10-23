@@ -406,7 +406,8 @@ internal class FixtureServer(private val bytes: ByteArray, private val includeSe
                     out.write("HTTP/1.1 200 OK\r\nContent-Length: ${data.size}\r\nConnection: close\r\n\r\n".toByteArray()); out.write(data); return
                 }
                 mediaRequests.incrementAndGet()
-                if (path.startsWith("/flaky") && flakyRequests.incrementAndGet() <= 2) {
+                // Exhaust both local retries so session-level recovery is exercised too.
+                if (path.startsWith("/flaky") && flakyRequests.incrementAndGet() <= 3) {
                     out.write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()); return
                 }
                 offset = offset.coerceIn(0,bytes.size)

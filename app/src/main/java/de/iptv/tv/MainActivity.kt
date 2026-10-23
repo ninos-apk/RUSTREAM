@@ -243,6 +243,7 @@ class MainActivity : ComponentActivity() {
             }
         })
         playback.bufferProfile = PlaybackBufferProfile.fromKey(getPreferences(MODE_PRIVATE).getString("liveBufferProfile", null))
+        getPreferences(MODE_PRIVATE).edit().putString("liveBufferProfile", playback.bufferProfile.key).apply()
         libraryStore = UserLibraryStore(applicationContext)
         tracker = WatchTracker(userLibrary)
         userLibrary.historyLimit = getPreferences(MODE_PRIVATE).getInt("historyLimit", UserLibrary.DEFAULT_LIMIT)
@@ -676,28 +677,13 @@ class MainActivity : ComponentActivity() {
         scroll.requestFocus()
     }
     private fun bufferDialog() {
-        val profiles = PlaybackBufferProfile.entries.filterNot { it.custom }
-        val current = playback.bufferProfile
-        val customLabel = if (current.custom) getString(R.string.buffer_custom_selected, current.targetMs / 1_000)
-            else getString(R.string.buffer_custom)
+        val profiles = PlaybackBufferProfile.entries
         AlertDialog.Builder(this).setTitle(R.string.buffer_title)
-            .setSingleChoiceItems((profiles.map { getString(it.label) } + customLabel).toTypedArray(),
-                if (current.custom) profiles.size else profiles.indexOf(current)) { dialog, index ->
+            .setSingleChoiceItems(profiles.map { getString(it.label) }.toTypedArray(),
+                profiles.indexOf(playback.bufferProfile)) { dialog, index ->
                 dialog.dismiss()
-                if (index == profiles.size) customBufferDialog() else saveBufferProfile(profiles[index])
-            }.setNegativeButton(R.string.close, null).show()
-    }
-    private fun customBufferDialog() {
-        val profiles = PlaybackBufferProfile.entries.filter { it.custom }
-        AlertDialog.Builder(this).setTitle(R.string.buffer_custom_title)
-            .setSingleChoiceItems(profiles.map { getString(it.label) }.toTypedArray(), profiles.indexOf(playback.bufferProfile)) { dialog, index ->
                 saveBufferProfile(profiles[index])
-                dialog.dismiss()
-            }.setNegativeButton(R.string.buffer_back) { _, _ -> bufferDialog() }
-            .create().apply {
-                setOnCancelListener { bufferDialog() }
-                show()
-            }
+            }.setNegativeButton(R.string.close, null).show()
     }
     private fun saveBufferProfile(profile: PlaybackBufferProfile) {
         playback.bufferProfile = profile
@@ -1706,6 +1692,7 @@ class MainActivity : ComponentActivity() {
             .put("build_id",BuildConfig.CORE_BUILD_ID)
             .put("core",core.call("info")).put("import",loader.lastReport).put("last_error",lastFailure?:JSONObject.NULL)
             .put("playback_error",playback.lastError?:JSONObject.NULL)
+            .put("playback_health",playback.diagnostics())
             .put("user_library",libraryStore.diagnostics(userLibrary)).put("artwork",artwork.stats())
         if(android.os.Build.VERSION.SDK_INT>=30){
             val manager=getSystemService(android.app.ActivityManager::class.java)
