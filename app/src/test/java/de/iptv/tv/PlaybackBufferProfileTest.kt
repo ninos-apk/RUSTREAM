@@ -40,12 +40,12 @@ class PlaybackBufferProfileTest {
         assertEquals(listOf("sport", "balanced", "stable"),
             PlaybackBufferProfile.entries.filterNot { it.custom }.map { it.key })
     }
-    @Test fun vodRefillsBelowOneMinuteAndByteBudgetWinsOverTimeTarget() {
+    @Test fun vodRefillsBelowOneMinuteEvenAtTheByteTarget() {
         val buffers = PlaybackBufferProfile.BALANCED.buffers(false)
         val mediaAllocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
         val control = DefaultLoadControl.Builder().setAllocator(mediaAllocator)
             .setBufferDurationsMs(buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs)
-            .setTargetBufferBytes(buffers.bytes).setPrioritizeTimeOverSizeThresholds(false).build()
+            .setTargetBufferBytes(buffers.bytes).setPrioritizeTimeOverSizeThresholds(true).build()
         val player = PlayerId("buffer-test")
         val timeline = SinglePeriodTimeline(300_000_000L, true, false, false, null, MediaItem.EMPTY)
         fun parameters(bufferedSeconds: Long) = LoadControl.Parameters(
@@ -61,7 +61,9 @@ class PlaybackBufferProfileTest {
             assertFalse("Keep consuming the reserve before refilling", control.shouldContinueLoading(parameters(90)))
             assertTrue("Refill below one minute", control.shouldContinueLoading(parameters(59)))
             while (mediaAllocator.totalBytesAllocated < buffers.bytes) allocations += allocator.allocate()
-            assertFalse("Stop at the byte budget even with only thirty seconds buffered", control.shouldContinueLoading(parameters(30)))
+            assertTrue("The byte target must not block the minimum VOD reserve", control.shouldContinueLoading(parameters(30)))
+            assertTrue("Keep requesting data below one minute", control.shouldContinueLoading(parameters(59)))
+            assertFalse("Above one minute the byte target can stop read-ahead", control.shouldContinueLoading(parameters(60)))
             allocations.forEach { allocator.release(it) }
             allocations.clear()
             assertTrue("Resume once the byte budget has room", control.shouldContinueLoading(parameters(30)))

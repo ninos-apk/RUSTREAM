@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
@@ -81,6 +82,8 @@ class PlayerPane(
     private var initialSeekWork: Job? = null
     private val hold = SeekHold()
     private var heldKey = 0
+    private var seekFocus: View? = null
+    private var restartVisible = false
     private var lastStats = PlaybackStats()
     private var statusText = ""
     private var guideText = ""
@@ -91,7 +94,7 @@ class PlayerPane(
     val controlsVisible get() = overlay.visibility == View.VISIBLE
     val seeking get() = hold.active
     private val focusListener = ViewTreeObserver.OnGlobalFocusChangeListener { _, _ ->
-        if (!video.hasFocus()) cancelSeek()
+        if (seeking && seekFocus?.hasFocus() != true) cancelSeek()
         updateFocus()
     }
 
@@ -126,6 +129,17 @@ class PlayerPane(
             val button = TvIconButton(context, symbol, context.getString(label)) { touch(); cancelSeek(); action(key) }.apply { id = View.generateViewId() }
             TvUi.focus(button, 1f) { focused -> if (focused) { caption.text = button.contentDescription; touch() } }
             buttons[key] = button
+            if (key == "back" || key == "forward") button.setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        if (canSeek()) { button.requestFocus(); startSeek(-1, if (key == "forward") 1 else -1, button) }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> { stopHeldSeek(); true }
+                    MotionEvent.ACTION_CANCEL -> { cancelSeek(); true }
+                    else -> true
+                }
+            }
             val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
             controlColumns[key] = column
             // The ±30 icons carry their number; extra labels pushed them above the other buttons.
@@ -149,15 +163,20 @@ class PlayerPane(
         setEpisodeNavigation(false)
     }
     /** Controls follow the playing episode, independent of the currently browsed library. */
-    fun setEpisodeNavigation(visible: Boolean, previous: Boolean = false, next: Boolean = false) {
+    fun setEpisodeNavigation(visible: Boolean, previous: Boolean = false, next: Boolean = false, restart: Boolean = visible) {
+        restartVisible = restart
         var restoreFocus = false
         for ((key, available) in listOf("previous_episode" to previous, "next_episode" to next)) {
+            val shown = if (key == "previous_episode") restart else visible
             buttons.getValue(key).apply {
-                if (hasFocus() && (!visible || !available)) restoreFocus = true
-                visibility = if (visible) View.VISIBLE else View.GONE
-                isEnabled = visible && available; isFocusable = isEnabled
+                val enabled = if (key == "previous_episode") restart && lastStats.seekable && !lastStats.live else visible && available
+                if (hasFocus() && !enabled) restoreFocus = true
+                visibility = if (shown) View.VISIBLE else View.GONE
+                isEnabled = enabled; isFocusable = isEnabled
+                if (key == "previous_episode") contentDescription = context.getString(
+                    if (previous) R.string.player_restart_previous else R.string.player_restart)
             }
-            controlColumns.getValue(key).visibility = if (visible) View.VISIBLE else View.GONE
+            controlColumns.getValue(key).visibility = if (shown) View.VISIBLE else View.GONE
         }
         updateControlFocus()
         if (restoreFocus) buttons.getValue("play").requestFocus()
@@ -205,12 +224,16 @@ class PlayerPane(
         play.isEnabled = hasSelection
         buttons.getValue("stop").isEnabled = video.player != null
         for (key in listOf("back", "forward")) buttons.getValue(key).apply { isEnabled = stats.seekable; isFocusable = stats.seekable }
+        buttons.getValue("previous_episode").apply {
+            isEnabled = restartVisible && stats.seekable && !stats.live && hasSelection
+            isFocusable = isEnabled
+        }
         buttons.getValue("favorite").apply { val available = hasSelection && favorite != null; isEnabled = available; isFocusable = available }
         if (buttons.values.any { !it.isEnabled && it.hasFocus() }) play.requestFocus()
         updateControlFocus()
         if (seeking && (!stats.seekable || stats.live || !hasSelection)) cancelSeek()
         if (!seeking) updateTimeline(stats.positionMs)
-        if (controlsVisible && stats.playing && hideWork == null) scheduleHide()
+        if (controlsVisible && stats.playing && hideWork == null && !seeking) scheduleHide()
         if (controlsVisible && !stats.playing) { hideWork?.cancel(); hideWork = null }
         buttons.values.firstOrNull { it.hasFocus() }?.let { caption.text = it.contentDescription }
         updateInfo(); updateFocus()
@@ -244,24 +267,37 @@ class PlayerPane(
         stopHeldSeek()
     }
     private fun stopHeldSeek() {
-        seekWork?.cancel(); seekWork = null; hold.cancel(); heldKey = 0
+        seekWork?.cancel(); seekWork = null; hold.cancel(); heldKey = 0; seekFocus = null
+        if (controlsVisible && lastStats.playing) touch()
     }
-    private fun startSeek(key: Int) {
-        val direction = if (key == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
+    private fun canSeek() = lastStats.seekable && !lastStats.live && hasSelection && video.player != null
+    private fun startSeek(key: Int, direction: Int, owner: View = video) {
         val now = SystemClock.uptimeMillis()
         val player = video.player ?: return
         val target = hold.begin(direction, now, player.currentPosition, lastStats.durationMs) ?: return
-        seekWork?.cancel(); initialSeekWork?.cancel(); heldKey = key; hideWork?.cancel(); hideWork = null
+        seekWork?.cancel(); initialSeekWork?.cancel(); heldKey = key; seekFocus = owner; hideWork?.cancel(); hideWork = null
         initialSeekWork = scope.launch { seekTo(target); showSeek(target, now, false, direction) }
         seekWork = scope.launch {
             delay(SeekHold.HOLD_MS)
             initialSeekWork?.join()
-            while (isActive && hold.active && video.hasFocus() && isFullscreen && video.player === player) {
+            while (isActive && hold.active && owner.hasFocus() && hasWindowFocus() && video.player === player) {
                 val tick = SystemClock.uptimeMillis()
                 hold.advance(tick)?.let { position -> seekTo(position); showSeek(position, tick, true) }
                 delay(160)
             }
+            stopHeldSeek()
         }
+    }
+    /** Media keys also work when focus is outside the player; the Activity forwards both edges. */
+    fun handleMediaSeek(event: KeyEvent): Boolean {
+        if (event.keyCode !in setOf(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND)) return false
+        if (event.action == KeyEvent.ACTION_UP) {
+            if (heldKey == event.keyCode) stopHeldSeek()
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && canSeek())
+            startSeek(event.keyCode, if (event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 1 else -1, rootView.findFocus() ?: video)
+        return true
     }
     private fun showSeek(position: Long, now: Long, accelerated: Boolean, value: Int = hold.direction) {
         val direction = context.getString(if (value > 0) R.string.player_fast_forward else R.string.player_rewind)
@@ -271,6 +307,13 @@ class PlayerPane(
     fun handleKey(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_UP && event.keyCode == heldKey && heldKey != 0) { stopHeldSeek(); return true }
         if (event.action != KeyEvent.ACTION_DOWN || !hasFocus()) return false
+        if (event.keyCode in setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+            val focused = buttons.entries.firstOrNull { it.value.hasFocus() && it.value.isEnabled }
+            if (focused?.key in setOf("back", "forward")) {
+                if (event.repeatCount == 0 && canSeek()) startSeek(event.keyCode, if (focused?.key == "forward") 1 else -1, focused!!.value)
+                return true
+            }
+        }
         if (controlsVisible && !video.hasFocus()) {
             touch()
             when (event.keyCode) {
@@ -298,7 +341,8 @@ class PlayerPane(
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (!isFullscreen) { if (event.repeatCount == 0) { hideControls(); action(if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) "library" else "statistics") } }
                 else if (lastStats.seekable && !lastStats.live && hasSelection) {
-                    if (heldKey != event.keyCode) startSeek(event.keyCode)
+                    if (heldKey != event.keyCode && event.repeatCount == 0)
+                        startSeek(event.keyCode, if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1)
                 } else if (event.repeatCount == 0) flash(context.getString(R.string.player_live_no_seek))
                 return true
             }

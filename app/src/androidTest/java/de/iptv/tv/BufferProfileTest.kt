@@ -94,7 +94,7 @@ class BufferProfileTest {
         val bytes = connection.getInputStream().use { it.readBytes() }
         FixtureServer(bytes).use { server ->
             val playlist = File(context.cacheDir, "buffer-reserve.m3u").apply {
-                writeText("#EXTM3U\n#EXTINF:300,Reserve Film\n${server.base}/movie/reserve.mp4\n#EXTINF:300,Reserve Series S01E01\n${server.base}/series/reserve.mp4\n")
+                writeText("#EXTM3U\n#EXTINF:300,Reserve Film\n${server.base}/movie/reserve.mp4\n#EXTINF:300,Reserve Series S01E01\n${server.base}/series/reserve.mp4\n#EXTINF:300,Stalled Film\n${server.base}/stall.mp4\n")
             }
             val core = Core()
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -144,6 +144,23 @@ class BufferProfileTest {
                     runBlocking { withContext(Dispatchers.Main) { playback.select(revision, 1) } }
                     waitFor("Series use the same two-minute reserve independently of the live profile") {
                         playback.player!!.let { it.totalBufferedDuration >= 115_000 && !it.isLoading }
+                    }
+                    runBlocking { withContext(Dispatchers.Main) { playback.select(revision, 2) } }
+                    waitFor("The stalled transfer starts playback with a low reserve") {
+                        playback.player!!.let { it.isPlaying && it.currentPosition >= 2_000 && it.totalBufferedDuration < 60_000 }
+                    }
+                    var stalled: androidx.media3.exoplayer.ExoPlayer? = null
+                    var positionBeforeRetry = 0L
+                    instrumentation.runOnMainSync {
+                        stalled = playback.player
+                        positionBeforeRetry = playback.player!!.currentPosition
+                    }
+                    waitFor("A stalled download retries before the existing reserve is exhausted") {
+                        playback.player!==stalled && server.stallRequests.get()>=2 && playback.player?.isPlaying==true
+                    }
+                    instrumentation.runOnMainSync {
+                        assertTrue("Recovery resumes from the reported position", playback.player!!.currentPosition >= positionBeforeRetry)
+                        assertTrue("Recovery happens before the initial reserve runs out", playback.player!!.currentPosition < 50_000)
                     }
                     instrumentation.runOnMainSync { playback.release() }
                 }

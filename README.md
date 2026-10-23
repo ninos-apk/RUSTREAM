@@ -1,5 +1,7 @@
 # RUSTREAM IPTV PLAYER – Android TV / Google TV
 
+**Wiedergabesteuerung (23. Oktober 2026):** Bei Filmen und Serien springt der Anfangsbutton zunächst auf 00:00; bei Serien öffnet erneutes Drücken innerhalb von 10 Sekunden die vorherige Episode. Die ±30-Sekunden-Buttons und Spultasten beschleunigen beim Halten. Unter 60 Sekunden VOD-Puffer erhält das Nachladen Vorrang vor dem Byteziel; bei ausbleibendem Datenfortschritt wird an der bisherigen Position erneut verbunden. Verhalten, Speicherbedarf und Prüfungen: [Wiedergabesteuerung und Nachladen](docs/PLAYBACK_CONTROLS.md).
+
 **Version 0.5.8 — App-Updates:** Eine Glocke neben den Einstellungen zeigt neuere vertrauenswürdige Entwicklungsversionen an. Änderungen lassen sich mit der Fernbedienung lesen; APK-Updates werden direkt heruntergeladen, geprüft und mit Android-Bestätigung installiert. Die erste Fassung mit Updater muss manuell installiert werden. Release-Vertrag, Signierung und Tests: [App-Updates](docs/APP_UPDATES.md).
 
 **Filmdetails und Bewertungen (19. Oktober 2026):** Unter der Film-Wiedergabeaktion öffnet „Filmdetails“ eine eigene Ansicht mit gemeinsamen Favoriten, Filmangaben, Bewertungen und Besetzung. Film- und Serienkarten laden Bewertungen für den sichtbaren Ausschnitt bereits ohne Detailklick. Ein eigener TMDB Read Access Token lässt sich verschlüsselt unter **Einstellungen → TMDB** speichern. Umsetzung, Grenzen, UI-Prüfung und reproduzierbare Tests: [Filmdetails und Bewertungen](docs/MOVIE_METADATA.md). Testlauf auf einem vorhandenen TV-Testemulator: `scripts/test-movie-metadata.ps1`.

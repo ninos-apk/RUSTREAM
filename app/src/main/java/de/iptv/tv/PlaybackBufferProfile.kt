@@ -2,7 +2,7 @@ package de.iptv.tv
 
 import androidx.annotation.StringRes
 
-/** Byte targets limit media read-ahead; they are not a limit on the whole player process. */
+/** Byte targets bound read-ahead above the minimum time reserve, not the whole process. */
 enum class PlaybackBufferProfile(
     val key: String, @param:StringRes val label: Int, val targetMs: Int,
     val startMs: Int, val rebufferMs: Int, val bytes: Int,

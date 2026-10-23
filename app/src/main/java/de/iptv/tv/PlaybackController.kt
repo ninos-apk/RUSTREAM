@@ -56,6 +56,7 @@ class PlaybackController(
     var lastError: JSONObject? = null; private set
     private var allocator: DefaultAllocator? = null
     private var ingress = IngressMeter()
+    private val refillWatchdog = VodRefillWatchdog()
     private var live = false
     private var bufferTargetMs = 3_000
     /** Increments per selection; the player created for it reports samples under this token. */
@@ -93,6 +94,18 @@ class PlaybackController(
                                 "buffered" to current.totalBufferedDuration.coerceAtLeast(0) / 1000.0,
                                 "cache_end" to current.bufferedPosition.coerceAtLeast(0) / 1000.0,
                                 "buffering" to (current.playbackState == Player.STATE_BUFFERING), "ingress" to rate))
+                            if (player === current && refillWatchdog.shouldRetry(
+                                    SystemClock.elapsedRealtime(),
+                                    active = !live && !suspended && phase in setOf("playing", "buffering"),
+                                    positionMs = current.currentPosition.coerceAtLeast(0),
+                                    bufferedMs = current.totalBufferedDuration.coerceAtLeast(0),
+                                    cacheEndMs = current.bufferedPosition.coerceAtLeast(0),
+                                    durationMs = current.duration.takeIf { it > 0 },
+                                    receivedBytes = ingress.totalBytes,
+                                )) {
+                                // Rust owns the backoff and preserves the position reported above.
+                                apply(core.call("ended", "attempt" to attempt, "error" to true))
+                            }
                             publishStats(rate)
                             if (player === current) sample(current, PlaybackSample.Event.TICK)
                         } else {
@@ -144,6 +157,7 @@ class PlaybackController(
     suspend fun seek(deltaMs: Long) = operations.withLock {
         val p = player ?: return@withLock
         if (p.isCurrentMediaItemSeekable) {
+            refillWatchdog.reset()
             core.call("seek")
             val target = (p.currentPosition + deltaMs).coerceAtLeast(0)
             p.seekTo(if (p.duration > 0) target.coerceAtMost(p.duration) else target)
@@ -153,6 +167,7 @@ class PlaybackController(
     suspend fun seekTo(positionMs: Long) = operations.withLock {
         val p = player ?: return@withLock
         if (!p.isCurrentMediaItemSeekable || live) return@withLock
+        refillWatchdog.reset()
         val token = attempt
         core.call("seek")
         if (player !== p || attempt != token) return@withLock
@@ -209,8 +224,8 @@ class PlaybackController(
         val loadControl = DefaultLoadControl.Builder().setAllocator(mediaAllocator)
             .setBufferDurationsMs(buffers.minMs, buffers.maxMs, buffers.startMs, buffers.rebufferMs)
             .setTargetBufferBytes(buffers.bytes)
-            // The byte budget may stop read-ahead before the time target on high-bitrate streams.
-            .setPrioritizeTimeOverSizeThresholds(false).build()
+            // VOD must keep loading below 60 seconds even at the byte target.
+            .setPrioritizeTimeOverSizeThresholds(!live).build()
         val p = ExoPlayer.Builder(context).setMediaSourceFactory(media).setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
             .setHandleAudioBecomingNoisy(true).build()
@@ -242,7 +257,10 @@ class PlaybackController(
                 if (playbackState == Player.STATE_ENDED) scope.launch { operations.withLock { if (player === p && attempt == token) apply(core.call("ended", "attempt" to token, "error" to false)) } }
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-                if (player === p && reason == Player.DISCONTINUITY_REASON_SEEK) scope.launch { operations.withLock { if (player === p && attempt == token) core.call("seek") } }
+                if (player === p && reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    refillWatchdog.reset()
+                    scope.launch { operations.withLock { if (player === p && attempt == token) core.call("seek") } }
+                }
             }
         })
         session = MediaSession.Builder(context, p).build()
@@ -298,6 +316,7 @@ class PlaybackController(
         }
     }
     fun releasePlayer() {
+        refillWatchdog.reset()
         cancelRetry()
         // Last position of this player, still under the token of the selection that created it.
         player?.let { sample(it, PlaybackSample.Event.RELEASE) }

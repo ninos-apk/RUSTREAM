@@ -359,6 +359,7 @@ internal class FixtureServer(private val bytes: ByteArray, private val includeSe
     val mediaRequests = AtomicInteger()
     val flakyRequests = AtomicInteger()
     val cutRequests = AtomicInteger()
+    val stallRequests = AtomicInteger()
     val conditionalRequests = AtomicInteger()
     val base = "http://127.0.0.1:${socket.localPort}"
     init { workers.execute { while (!socket.isClosed) { try { val client = socket.accept(); workers.execute { serve(client) } } catch (_: Exception) { break } } } }
@@ -411,6 +412,13 @@ internal class FixtureServer(private val bytes: ByteArray, private val includeSe
                 offset = offset.coerceIn(0,bytes.size)
                 val range = if (ranged) "Content-Range: bytes $offset-${bytes.size-1}/${bytes.size}\r\n" else ""
                 out.write("HTTP/1.1 ${if (ranged) "206 Partial Content" else "200 OK"}\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\n${range}Content-Length: ${bytes.size-offset}\r\nConnection: close\r\n\r\n".toByteArray())
+                if (path.startsWith("/stall.mp4") && stallRequests.incrementAndGet() == 1) {
+                    // A long-video fixture starts playing with <60s reserve, then the socket stays open.
+                    val end = (bytes.size / 8).coerceAtLeast(offset).coerceAtMost(bytes.size)
+                    out.write(bytes, offset, end - offset); out.flush()
+                    SystemClock.sleep(20_000)
+                    return
+                }
                 if (path.startsWith("/cut.mp4") && cutRequests.incrementAndGet() == 1) {
                     // Advertise the complete body, deliver enough media to start, then break the socket.
                     val end = 700_000.coerceAtMost(bytes.size)

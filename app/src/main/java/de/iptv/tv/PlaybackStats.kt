@@ -8,6 +8,7 @@ class IngressMeter {
     private var lastBytes = 0L
     private var lastTime: Long? = null
     val hasData get() = bytes.get() > 0
+    val totalBytes get() = bytes.get()
     fun add(count: Int) { if (count > 0) bytes.addAndGet(count.toLong()) }
     fun sample(nowMs: Long): Long? {
         val current = bytes.get()

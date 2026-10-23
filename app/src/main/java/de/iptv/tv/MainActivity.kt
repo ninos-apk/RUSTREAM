@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
     private var playContext:PlayContext?=null
     private var episodeNavigationWork:Job?=null
     private var previousEpisodeId:Long?=null
+    private val restartPreviousPress = RestartPreviousPress()
     private var nextEpisodeId:Long?=null
     private val gridMode get()=kind!="live" && openedSeries==null && openedMovie==null
     private var libraryReady = false
@@ -750,6 +751,7 @@ class MainActivity : ComponentActivity() {
     } }
     /** Selects [id] and starts tracking it for history and progress. */
     private suspend fun startPlayback(rev:Long,id:Long,entry:JSONObject,fromStart:Boolean,contextKind:String){
+        restartPreviousPress.reset()
         val key=entry.optString("key").takeIf{it.isNotEmpty()&&it!="null"}
         val live=entry.optBoolean("live")
         val source=activeSourceId
@@ -1056,9 +1058,10 @@ class MainActivity : ComponentActivity() {
         previousEpisodeId=null;nextEpisodeId=null
         val id=selectedId
         val context=playContext
-        val visible=id!=null&&context?.kind=="series"&&context.show!=null
-        if(!visible||playerPane.buttons.getValue("next_episode").visibility!=View.VISIBLE)playerPane.setEpisodeNavigation(visible)
-        if(!visible||id==null||context==null)return
+        val series=id!=null&&context?.kind=="series"&&context.show!=null
+        if(!series||playerPane.buttons.getValue("next_episode").visibility!=View.VISIBLE)
+            playerPane.setEpisodeNavigation(series, restart=id!=null&&context?.kind in setOf("movies","series"))
+        if(!series)return
         val rev=revision
         episodeNavigationWork=launchSafe {
             suspend fun adjacent(direction:Int)=core.call("adjacent","revision" to rev,"id" to id,"direction" to direction,
@@ -1103,9 +1106,28 @@ class MainActivity : ComponentActivity() {
             "favorite" -> tracker.current?.let { toggleFavorite(it.section,it.libraryKey,it.seriesName ?: it.name) }
             "back" -> launchSafe { playback.seek(-30_000) }
             "forward" -> launchSafe { playback.seek(30_000) }
-            "previous_episode" -> navigateSeriesEpisode(-1)
+            "previous_episode" -> {
+                val p=playback.player ?: return
+                if(busy||selectionWork?.isActive==true||!p.isCurrentMediaItemSeekable||playContext?.kind !in setOf("movies","series"))return
+                val pressedAt=android.os.SystemClock.elapsedRealtime()
+                if(restartPreviousPress.previous(pressedAt,playContext?.kind=="series"&&previousEpisodeId!=null))
+                    navigateSeriesEpisode(-1)
+                else if(playback.phase=="finished") {
+                    val id=selectedId ?: return
+                    selectionWork=launchSafe {
+                        restartSelection(id,true);markChannel(id)
+                        // Reloading an ended item creates a fresh session; retain this first press.
+                        restartPreviousPress.previous(pressedAt,false)
+                        showRestartFeedback()
+                    }
+                }
+                else launchSafe {
+                    playback.seekTo(0)
+                    showRestartFeedback()
+                }
+            }
             "next_episode" -> navigateSeriesEpisode(1)
-            "stop" -> launchSafe { playerPane.cancelSeek(); playback.stop(); channelRows.notifyDataSetChanged(); playerPane.showControls(true) }
+            "stop" -> launchSafe { restartPreviousPress.reset(); playerPane.cancelSeek(); playback.stop(); channelRows.notifyDataSetChanged(); playerPane.showControls(true) }
             "reconnect" -> {
                 if(reconnectWork?.isActive==true || busy || selectedId==null) return
                 val restoreRefreshFocus=details.refreshButton.hasFocus()
@@ -1124,12 +1146,15 @@ class MainActivity : ComponentActivity() {
             "statistics" -> details.refreshButton.takeIf { it.isEnabled }?.requestFocus() ?: status.requestFocus()
         }
     }
-    /** Play the selection again after stop/end: a new token, saved progress unless it finished. */
-    private suspend fun restartSelection(id:Long){
+    private fun showRestartFeedback() {
+        playerPane.flash(getString(if(playContext?.kind=="series"&&previousEpisodeId!=null)R.string.player_restart_hint else R.string.player_restart))
+    }
+    /** Play the selection again after stop/end, optionally ignoring saved progress. */
+    private suspend fun restartSelection(id:Long,fromStart:Boolean=false){
         val rev=revision
         val entry=core.call("entry","revision" to rev,"id" to id)
         if(rev!=revision)return
-        startPlayback(rev,id,entry,false,playContext?.kind ?: kind)
+        startPlayback(rev,id,entry,fromStart,playContext?.kind ?: kind)
     }
     override fun onStart() {
         super.onStart()
@@ -1648,6 +1673,12 @@ class MainActivity : ComponentActivity() {
         else if(playerPane.hasFocus())returnToChannels()
         else if(openedSeries!=null||openedMovie!=null)closeSeries(true,true) else finish()
     }
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (::playerPane.isInitialized && currentFocus !is EditText &&
+            event.keyCode in setOf(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND) &&
+            playerPane.handleMediaSeek(event)) return true
+        return super.onKeyUp(keyCode, event)
+    }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (::playback.isInitialized && event.action == KeyEvent.ACTION_DOWN && currentFocus !is EditText) {
             when (event.keyCode) {
@@ -1655,8 +1686,7 @@ class MainActivity : ComponentActivity() {
                 KeyEvent.KEYCODE_MEDIA_PLAY -> { if (playback.player?.playWhenReady != true) playerAction("play"); return true }
                 KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (playback.player?.playWhenReady == true) playerAction("play"); return true }
                 KeyEvent.KEYCODE_MEDIA_STOP -> { playerAction("stop"); return true }
-                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { launchSafe { playback.seek(30_000) }; return true }
-                KeyEvent.KEYCODE_MEDIA_REWIND -> { launchSafe { playback.seek(-30_000) }; return true }
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> return playerPane.handleMediaSeek(event)
                 KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
                     if(event.repeatCount>0)return true
                     playerPane.cancelSeek()

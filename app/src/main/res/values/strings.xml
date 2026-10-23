@@ -145,6 +145,9 @@
     <string name="player_back_30">30 Sekunden zurück</string>
     <string name="player_forward_30">30 Sekunden vor</string>
     <string name="player_previous_episode">Vorherige Episode</string>
+    <string name="player_restart">Zum Anfang</string>
+    <string name="player_restart_previous">Zum Anfang / vorherige Episode</string>
+    <string name="player_restart_hint">Zum Anfang · Innerhalb von 10 Sekunden erneut drücken: vorherige Episode</string>
     <string name="player_next_episode">Nächste Episode</string>
     <string name="player_play">Wiedergabe starten</string>
     <string name="player_pause">Pause</string>

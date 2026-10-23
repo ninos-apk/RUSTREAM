@@ -65,7 +65,14 @@ class SeriesPlaybackControlsTest {
                         }
                         fun controls(){scenario.onTvActivity{pane(it).showControls(true)}}
                         fun pressControl(key:String){
-                            scenario.onTvActivity{assertTrue(pane(it).buttons.getValue(key).requestFocus())}
+                            waitFor("$key ready after selection") {
+                                (field(it,"selectionWork") as? kotlinx.coroutines.Job)?.isActive!=true&&pane(it).buttons.getValue(key).isEnabled
+                            }
+                            scenario.onTvActivity{
+                                pane(it).showControls()
+                                assertTrue("$scale: focus $key",pane(it).buttons.getValue(key).requestFocus())
+                            }
+                            waitFor("$key focused and shown") { pane(it).buttons.getValue(key).let { button->button.hasFocus()&&button.isShown } }
                             device.pressDPadCenter()
                         }
                         activate("Control Live")
@@ -74,8 +81,8 @@ class SeriesPlaybackControlsTest {
                         activate("Series (2)");activate("Control Show")
                         scenario.onTvActivity{assertHidden(it)}
                         activate("Control Show S1 E1")
-                        waitFor("First episode has only Next enabled"){
-                            episode(it)==1L&&pane(it).buttons.getValue("next_episode").isEnabled&&!pane(it).buttons.getValue("previous_episode").isEnabled&&pane(it).buttons.getValue("back").isEnabled
+                        waitFor("First episode can restart and advance"){
+                            episode(it)==1L&&pane(it).buttons.getValue("next_episode").isEnabled&&pane(it).buttons.getValue("previous_episode").isEnabled&&pane(it).buttons.getValue("back").isEnabled
                         }
                         controls()
                         // Real remote traversal includes the new Next target after +30 seconds.
@@ -107,13 +114,22 @@ class SeriesPlaybackControlsTest {
                         scenario.onTvActivity{assertTrue(pane(it).buttons.getValue("forward").requestFocus())}
                         device.pressDPadRight()
                         waitFor("Disabled Next is skipped"){pane(it).buttons.getValue("stop").hasFocus()}
+                        scenario.onTvActivity { playback(it).player!!.apply { pause(); seekTo(10_000) } }
+                        waitFor("Episode 3 positioned away from the start") { playback(it).player!!.currentPosition>=9_000 }
+                        pressControl("previous_episode")
+                        waitFor("First press restarts episode 3") { episode(it)==3L&&playback(it).player!!.currentPosition<1_500 }
+                        // A held OK must not count as the second press.
+                        val held=SystemClock.uptimeMillis()
+                        instrumentation.sendKeySync(android.view.KeyEvent(held,held,android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_DPAD_CENTER,3))
+                        instrumentation.sendKeySync(android.view.KeyEvent(held,held,android.view.KeyEvent.ACTION_UP,android.view.KeyEvent.KEYCODE_DPAD_CENTER,0))
+                        scenario.onTvActivity { assertEquals(3L,episode(it)) }
                         pressControl("previous_episode")
                         waitFor("Previous returns to episode 2"){episode(it)==2L&&pane(it).buttons.getValue("next_episode").isEnabled}
                         controls();pressControl("fullscreen")
                         waitFor("Fullscreen"){pane(it).isFullscreen}
-                        controls();pressControl("previous_episode")
+                        controls();pressControl("previous_episode");pressControl("previous_episode")
                         waitFor("Previous works inside fullscreen"){
-                            pane(it).isFullscreen&&episode(it)==1L&&!pane(it).buttons.getValue("previous_episode").isEnabled&&pane(it).buttons.getValue("next_episode").isEnabled
+                            pane(it).isFullscreen&&episode(it)==1L&&pane(it).buttons.getValue("previous_episode").isEnabled&&pane(it).buttons.getValue("next_episode").isEnabled
                         }
                         controls();pressControl("next_episode")
                         waitFor("Next preserves fullscreen"){pane(it).isFullscreen&&episode(it)==2L&&pane(it).buttons.getValue("previous_episode").isEnabled}
@@ -123,9 +139,31 @@ class SeriesPlaybackControlsTest {
                         waitFor("Preview restored"){!pane(it).isFullscreen}
                         activate("Movies (1)");activate("Control Film")
                         scenario.onTvActivity{assertEquals("Browsing a film keeps controls for the playing episode",View.VISIBLE,pane(it).buttons.getValue("next_episode").visibility)}
-                        activate("Abspielen")
+                        waitFor("Movie exposes the playback action") { (field(it,"moviePlay") as View).isShown }
+                        scenario.onTvActivity {
+                            // After the first font-size pass this may say Resume, depending on saved progress.
+                            assertTrue((field(it,"moviePlay") as View).requestFocus())
+                        }
+                        device.pressDPadCenter()
                         waitFor("Movie replaces the episode"){playback(it).title=="Control Film"&&playback(it).player!=null&&pane(it).buttons.getValue("next_episode").visibility==View.GONE}
-                        scenario.onTvActivity{assertHidden(it)}
+                        waitFor("Movie restart is available") { pane(it).buttons.getValue("previous_episode").isEnabled }
+                        controls()
+                        scenario.onTvActivity { playback(it).player!!.apply { pause(); seekTo(10_000) } }
+                        waitFor("Movie positioned away from the start") { playback(it).player!!.currentPosition>=9_000 }
+                        pressControl("previous_episode")
+                        waitFor("Movie restarts") { playback(it).title=="Control Film"&&playback(it).player!!.currentPosition<1_500 }
+                        pressControl("previous_episode")
+                        scenario.onTvActivity {
+                            assertEquals("Control Film",playback(it).title)
+                            assertEquals(View.GONE,pane(it).buttons.getValue("next_episode").visibility)
+                            assertEquals(View.VISIBLE,pane(it).buttons.getValue("previous_episode").visibility)
+                        }
+                        scenario.onTvActivity { playback(it).player!!.apply { seekTo(duration); play() } }
+                        waitFor("Movie reaches its natural end") { playback(it).phase=="finished" }
+                        controls();pressControl("previous_episode")
+                        waitFor("Restart also works after the movie ended") {
+                            playback(it).title=="Control Film"&&playback(it).player?.isPlaying==true&&playback(it).player!!.currentPosition<3_000
+                        }
                     }
                 }
             }finally{device.executeShellCommand("settings put system font_scale $oldScale");store.save(old);file.delete()}
