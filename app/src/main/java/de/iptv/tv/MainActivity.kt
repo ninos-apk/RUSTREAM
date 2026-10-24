@@ -7,6 +7,10 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.text.TextUtils
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
@@ -19,6 +23,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.TextClock
 import android.widget.ScrollView
 import android.widget.ImageView
 import android.widget.HorizontalScrollView
@@ -310,6 +315,35 @@ class MainActivity : ComponentActivity() {
             if(key=="unclassified")tab.visibility=View.GONE
         }
         toolbar.addView(HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;addView(tabs)},LinearLayout.LayoutParams(0,-2,1f))
+        toolbar.addView(TextClock(this).apply {
+            tag = "navbar_clock"
+            // Native TextClock follows device time/timezone and only ticks while visible.
+            val detailScale = 13f / 20f
+            val clockFormat = SpannableString("HH:mm:ss").apply {
+                for (index in listOf(2,5)) {
+                    setSpan(ForegroundColorSpan(TvUi.muted),index,index+1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(RelativeSizeSpan(detailScale),index,index+1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                setSpan(ForegroundColorSpan(TvUi.accent),6,8,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(RelativeSizeSpan(detailScale),6,8,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            format12Hour = clockFormat
+            format24Hour = clockFormat
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            includeFontPadding = false
+            fontFeatureSettings = "tnum"
+            textDirection = View.TEXT_DIRECTION_LTR
+            gravity = Gravity.CENTER
+            setSingleLine()
+            val digitPairWidth = paint.measureText("00")
+            val separatorWidth = paint.measureText(":") * detailScale
+            minWidth = kotlin.math.ceil((digitPairWidth * (2f + detailScale) + separatorWidth * 2).toDouble()).toInt()
+            minHeight = dp(36)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_NONE
+        },LinearLayout.LayoutParams(-2,-2).apply { marginStart=dp(12);marginEnd=dp(12) })
         settingsButton = TvIconButton(this,"settings",getString(R.string.settings)) { settingsDialog() }.apply { id = View.generateViewId() }
         updateButton = TvIconButton(this,"notifications",getString(R.string.updates_title)) { showUpdates() }.apply { id = View.generateViewId() }
         toolbar.addView(updateButton,LinearLayout.LayoutParams(dp(36),dp(36)).apply { marginEnd=dp(8) })
