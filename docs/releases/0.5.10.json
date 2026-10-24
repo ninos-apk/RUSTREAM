@@ -1,0 +1,18 @@
+{
+  "version": "0.5.10",
+  "reviewed": true,
+  "de": [
+    "Der Diagnosebericht öffnet jetzt eine kompakte Logansicht mit Millisekunden-Zeitstempeln und farbigen INFO-, WARN- und ERROR-Markierungen.",
+    "Fehler zeigen verfügbare HTTP-, Media3- und Systemfehlernummern, betroffene Arbeitsschritte sowie Verbindungs- und Importversuche für die Fehlersuche.",
+    "Ein Wechsel zu JSON erhält alle bisherigen Diagnoseangaben und ergänzt den Ereignisverlauf. Beide Ansichten lassen sich vollständig kopieren.",
+    "Die letzten 500 Ereignisse bleiben während der laufenden App-Sitzung verfügbar. Neue Einträge unterbrechen das Lesen älterer Meldungen nicht.",
+    "Verbesserte Fernbedienungsnavigation, getrennte Lesepositionen für Logs und JSON sowie übersichtliche Aktionen bei großer Systemschrift."
+  ],
+  "en": [
+    "Diagnostics now opens a compact log view with millisecond timestamps and colored INFO, WARN and ERROR labels.",
+    "Errors include available HTTP, Media3 and system error numbers, affected stages, and playback/import attempt details for troubleshooting.",
+    "Switch to JSON to access all previous diagnostic information plus the event history. Both views can be copied in full.",
+    "The latest 500 events remain available during the current app session. New entries do not interrupt reading older messages.",
+    "Improved remote navigation, separate reading positions for Logs and JSON, and clearer actions with large system text."
+  ]
+}

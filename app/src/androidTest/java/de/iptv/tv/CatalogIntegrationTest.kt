@@ -80,7 +80,8 @@ class CatalogIntegrationTest {
     }
     @Test fun conditionalDownloadAndOfflineCachePreserveFields():Unit=runBlocking {
         val source=JSONObject()
-        SourceLoader(context).use{loader->
+        val log=DiagnosticLog()
+        SourceLoader(context,log).use{loader->
             FixtureServer(byteArrayOf()).use{server->
                 source.put("kind","url").put("url","${server.base}/cached.m3u")
                 Core().use{core->
@@ -96,7 +97,25 @@ class CatalogIntegrationTest {
             Core().use{cold->
                 val restored=loader.restore(source,cold)!!
                 assertTrue(restored.getBoolean("cached"));assertEquals(1,restored.getInt("count"))
+                try {
+                    val missing=java.io.File(context.cacheDir,"diagnostic-missing-${System.nanoTime()}.m3u")
+                    loader.load(JSONObject().put("kind","file").put("uri",android.net.Uri.fromFile(missing).toString())
+                        .put("password","fixture-secret"),cold)
+                    fail("Invalid source must fail")
+                } catch(expected:ImportFailure) { assertEquals("file_not_found",expected.code) }
             }
+            val events=log.snapshot().events
+            val started=events.first { it.message==DiagnosticMessage.IMPORT_STARTED }
+            val completed=events.first { it.message==DiagnosticMessage.IMPORT_COMPLETED }
+            assertEquals(started.details["operation_id"],completed.details["operation_id"])
+            assertEquals(1,completed.details["count"])
+            assertTrue(events.any { it.message==DiagnosticMessage.IMPORT_UNCHANGED })
+            assertTrue(events.any { it.message==DiagnosticMessage.CACHE_RESTORED })
+            val failure=events.last { it.message==DiagnosticMessage.IMPORT_FAILED }
+            assertEquals("file_not_found",failure.details["code"])
+            assertEquals("copy_file",failure.details["stage"])
+            assertFalse(log.snapshot().json().toString().contains("fixture-secret"))
+            assertFalse(log.snapshot().json().toString().contains("127.0.0.1"))
             loader.remove(source)
         }
     }

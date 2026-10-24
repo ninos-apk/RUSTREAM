@@ -44,7 +44,8 @@ object BoundedCopy {
     }
 }
 
-class SourceLoader(private val context: Context) : java.io.Closeable {
+class SourceLoader(private val context: Context, private val log: DiagnosticLog = AppDiagnostics.log) : java.io.Closeable {
+    companion object { private val operationIds = java.util.concurrent.atomic.AtomicLong() }
     private val client = OkHttpClient.Builder().connectTimeout(15,TimeUnit.SECONDS)
         .readTimeout(30,TimeUnit.SECONDS).callTimeout(90,TimeUnit.SECONDS).followSslRedirects(false).build()
     private val catalogs by lazy { CatalogStore(context) }
@@ -57,7 +58,11 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
         val record = catalogs.entry(source) ?: return@withContext null
         core.call("open_catalog","path" to catalogs.safeFile(record.getString("file"))!!.absolutePath,"key" to record.getString("key"))
             .put("cached",true).put("updated",record.getLong("updated")).put("warnings",record.optJSONArray("warnings")?:JSONArray())
-            .also{ lastReport=JSONObject().put("cached",true).put("source_kind",source.optString("kind")).put("count",it.getInt("count")).put("restore_ms",(System.nanoTime()-started)/1e6).put("updated",record.getLong("updated")).put("warnings",record.optJSONArray("warnings")?:JSONArray()) }
+            .also{
+                lastReport=JSONObject().put("cached",true).put("source_kind",source.optString("kind")).put("count",it.getInt("count")).put("restore_ms",(System.nanoTime()-started)/1e6).put("updated",record.getLong("updated")).put("warnings",record.optJSONArray("warnings")?:JSONArray())
+                log.record(DiagnosticLevel.INFO,"Import",DiagnosticMessage.CACHE_RESTORED,
+                    "source_kind" to source.optString("kind"), "count" to it.getInt("count"), "restore_ms" to (System.nanoTime()-started)/1e6)
+            }
     }
     suspend fun shouldRefresh(source: JSONObject): Boolean = withContext(Dispatchers.IO) { catalogs.entry(source)?.let {
         val changed=source.optString("kind")=="file"&&fileSignature(source).let{current->current.length()>0&&current.toString()!=(it.optJSONObject("validators")?:JSONObject()).toString()}
@@ -67,6 +72,10 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
 
     suspend fun load(source: JSONObject, core: Core, epg: Boolean = false, activate: Boolean = true): JSONObject = withContext(Dispatchers.IO) {
         val started = System.nanoTime()
+        val operationId = operationIds.incrementAndGet()
+        val component = if (epg) "EPG" else "Import"
+        log.record(DiagnosticLevel.INFO,component,DiagnosticMessage.IMPORT_STARTED,
+            "operation_id" to operationId,"source_kind" to source.optString("kind"),"activated" to activate)
         val report = JSONObject().put("source_kind",source.optString("kind")).put("started",System.currentTimeMillis())
         val files = mutableListOf<File>()
         var target: File? = null
@@ -100,6 +109,8 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                         val restored=if(activate)restore(source,core) ?: throw ImportFailure("catalog_invalid","restore") else JSONObject().put("unchanged",true)
                         report.put("not_modified",true).put("total_ms",elapsed())
                         lastReport=report
+                        log.record(DiagnosticLevel.INFO,component,DiagnosticMessage.IMPORT_UNCHANGED,
+                            "operation_id" to operationId,"total_ms" to elapsed())
                         catalogs.commit(source,catalogs.safeFile(previous!!.getString("file"))!!,previous.getString("key"),previous.optJSONObject("validators")?:JSONObject(),previous.optBoolean("partial"),previous.optJSONArray("warnings")?:JSONArray())
                         return@withContext restored.put("unchanged",true).put("diagnostics",report)
                     }
@@ -148,6 +159,9 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                             val detail=ImportErrors.describe(error,stage)
                             if(field=="live"||detail.http !in setOf(404,405,501))throw error
                             warnings.put(JSONObject().put("section",field).put("error",detail.json()))
+                            log.record(DiagnosticLevel.WARN,component,DiagnosticMessage.IMPORT_WARNING,
+                                "operation_id" to operationId,"section" to field,"code" to detail.code,
+                                "stage" to detail.stage,"http_status" to detail.http)
                         }
                     }
                     temporary.writeText(manifest.toString())
@@ -192,10 +206,19 @@ class SourceLoader(private val context: Context) : java.io.Closeable {
                 .put("activated",activate)
                 .put("warnings",warnings).put("available_storage_mib",context.noBackupFilesDir.usableSpace/1048576)
             if(!epg)lastReport=report
+            log.record(DiagnosticLevel.INFO,component,DiagnosticMessage.IMPORT_COMPLETED,
+                "operation_id" to operationId,"count" to result.optInt("count"),"skipped" to result.optInt("skipped"),
+                "bytes" to report.optLong("bytes"),"total_ms" to elapsed(),"activated" to activate)
             result.put("diagnostics",report).put("warnings",warnings)
         } catch(error:Exception) {
-            if(error is kotlinx.coroutines.CancellationException)throw error
+            if(error is kotlinx.coroutines.CancellationException) {
+                log.record(DiagnosticLevel.INFO,component,DiagnosticMessage.IMPORT_CANCELLED,
+                    "operation_id" to operationId,"stage" to stage,"total_ms" to elapsed())
+                throw error
+            }
             val details=ImportErrors.describe(error,stage)
+            log.failure(component,DiagnosticMessage.IMPORT_FAILED,details,error,
+                "operation_id" to operationId,"total_ms" to elapsed())
             if(!epg)lastReport=report.put("total_ms",elapsed()).put("failure",details.json())
             throw ImportFailure(details.code,details.stage,details.http)
         } finally {

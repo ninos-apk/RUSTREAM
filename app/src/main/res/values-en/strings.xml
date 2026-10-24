@@ -262,6 +262,37 @@
     <string name="progress_working">Working …</string>
 
     <!-- Diagnostics -->
+    <string name="diagnostics_logs">Logs</string>
+    <string name="diagnostics_json">JSON</string>
+    <string name="diagnostics_copy_logs">Copy logs</string>
+    <string name="diagnostics_copy_json">Copy JSON</string>
+    <string name="diagnostics_log_text">Diagnostic report · logs</string>
+    <string name="diagnostics_log_hint">↑ ↓ Scroll · ← Views · → Copy · Back Close</string>
+    <string name="diagnostics_session_note">Current app session · latest 500 events · history resets when the process restarts</string>
+    <string name="diagnostics_dropped">Older events omitted: %1$d</string>
+    <string name="diagnostics_current_state">State captured at %1$s · full details in JSON</string>
+    <string name="diagnostics_new_entries">New entries · go to latest</string>
+    <string name="log_session_started">Diagnostic session started</string>
+    <string name="log_import_started">Import started</string>
+    <string name="log_import_completed">Import completed</string>
+    <string name="log_import_unchanged">Source unchanged; cached catalog retained</string>
+    <string name="log_import_cancelled">Import cancelled</string>
+    <string name="log_import_warning">Source section unavailable</string>
+    <string name="diagnostics_state_playback">Playback: %1$s · buffer profile: %2$s</string>
+    <string name="diagnostics_state_import">Import: entries=%1$s · total_ms=%2$s</string>
+    <string name="diagnostics_state_library">Library: writes=%1$s · last_error=%2$s</string>
+    <string name="diagnostics_state_artwork">Artwork: network_requests=%1$s · queued_loads=%2$s</string>
+    <string name="diagnostics_state_exit">Previous exit: %1$s · reason=%2$d · %3$s</string>
+    <string name="log_import_failed">Import failed</string>
+    <string name="log_cache_restored">Cached catalog restored</string>
+    <string name="log_operation_failed">Operation failed</string>
+    <string name="log_playback_started">Connecting to stream</string>
+    <string name="log_playback_state">Playback state changed</string>
+    <string name="log_playback_failed">Playback failed</string>
+    <string name="log_recovery">Playback recovery triggered</string>
+    <string name="log_recovered">Playback resumed after recovery</string>
+    <string name="log_retry_scheduled">Reconnection scheduled</string>
+    <string name="log_storage_failed">User library operation failed</string>
     <string name="diagnostics_title">Diagnostic report</string>
     <string name="diagnostics_clip">IPTV diagnostics</string>
     <string name="diagnostics_text">Diagnostic report · text</string>

@@ -266,6 +266,37 @@
     <string name="progress_working">Wird bearbeitet …</string>
 
     <!-- Diagnostics -->
+    <string name="diagnostics_logs">Logs</string>
+    <string name="diagnostics_json">JSON</string>
+    <string name="diagnostics_copy_logs">Protokoll kopieren</string>
+    <string name="diagnostics_copy_json">JSON kopieren</string>
+    <string name="diagnostics_log_text">Diagnosebericht · Protokoll</string>
+    <string name="diagnostics_log_hint">↑ ↓ Scrollen · ← Ansichten · → Kopieren · Zurück Schließen</string>
+    <string name="diagnostics_session_note">Aktuelle App-Sitzung · letzte 500 Ereignisse · Verlauf endet beim Prozessneustart</string>
+    <string name="diagnostics_dropped">Ältere Ereignisse ausgelassen: %1$d</string>
+    <string name="diagnostics_current_state">Zustand erfasst um %1$s · alle Details in JSON</string>
+    <string name="diagnostics_new_entries">Neue Einträge · zum Ende</string>
+    <string name="log_session_started">Diagnosesitzung gestartet</string>
+    <string name="log_import_started">Import gestartet</string>
+    <string name="log_import_completed">Import abgeschlossen</string>
+    <string name="log_import_unchanged">Quelle unverändert; gespeicherter Katalog beibehalten</string>
+    <string name="log_import_cancelled">Import abgebrochen</string>
+    <string name="log_import_warning">Quellenbereich nicht verfügbar</string>
+    <string name="diagnostics_state_playback">Wiedergabe: %1$s · Pufferprofil: %2$s</string>
+    <string name="diagnostics_state_import">Import: Einträge=%1$s · total_ms=%2$s</string>
+    <string name="diagnostics_state_library">Bibliothek: writes=%1$s · last_error=%2$s</string>
+    <string name="diagnostics_state_artwork">Bilder: network_requests=%1$s · queued_loads=%2$s</string>
+    <string name="diagnostics_state_exit">Letztes Prozessende: %1$s · reason=%2$d · %3$s</string>
+    <string name="log_import_failed">Import fehlgeschlagen</string>
+    <string name="log_cache_restored">Gespeicherter Katalog wiederhergestellt</string>
+    <string name="log_operation_failed">Vorgang fehlgeschlagen</string>
+    <string name="log_playback_started">Verbindung zum Stream wird hergestellt</string>
+    <string name="log_playback_state">Wiedergabestatus geändert</string>
+    <string name="log_playback_failed">Wiedergabe fehlgeschlagen</string>
+    <string name="log_recovery">Wiedergabewiederherstellung ausgelöst</string>
+    <string name="log_recovered">Wiedergabe nach Wiederherstellung fortgesetzt</string>
+    <string name="log_retry_scheduled">Erneute Verbindung geplant</string>
+    <string name="log_storage_failed">Vorgang in der Benutzerbibliothek fehlgeschlagen</string>
     <string name="diagnostics_title">Diagnosebericht</string>
     <string name="diagnostics_clip">IPTV Diagnose</string>
     <string name="diagnostics_text">Diagnosebericht · Text</string>

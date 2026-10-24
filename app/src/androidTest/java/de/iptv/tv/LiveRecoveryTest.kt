@@ -57,6 +57,7 @@ class LiveRecoveryTest {
             }
             val core = Core()
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            val diagnosticLog = DiagnosticLog()
             var controller: PlaybackController? = null
             try {
                 val revision = core.call("import", "path" to playlist.absolutePath).getLong("revision")
@@ -64,7 +65,7 @@ class LiveRecoveryTest {
                     scenario.onTvActivity { activity ->
                         val video = PlayerView(activity)
                         activity.findViewById<ViewGroup>(android.R.id.content).addView(video, ViewGroup.LayoutParams(320, 180))
-                        controller = PlaybackController(activity, core, scope, video, {})
+                        controller = PlaybackController(activity, core, scope, video, {}, log = diagnosticLog)
                     }
                     val playback = checkNotNull(controller)
                     runBlocking { withContext(Dispatchers.Main) { playback.start(); playback.select(revision, 0) } }
@@ -72,7 +73,8 @@ class LiveRecoveryTest {
                     val deadline = SystemClock.elapsedRealtime() + 30_000
                     while (!recovered && SystemClock.elapsedRealtime() < deadline) {
                         instrumentation.runOnMainSync {
-                            recovered = playback.player?.let { it.isPlaying && it.currentPosition >= 500 } == true
+                            recovered = playback.player?.let { it.isPlaying && it.currentPosition >= 500 } == true &&
+                                diagnosticLog.snapshot().events.any { it.message==DiagnosticMessage.RECOVERED }
                         }
                         if (!recovered) SystemClock.sleep(50)
                     }
@@ -82,6 +84,16 @@ class LiveRecoveryTest {
                         assertTrue("A full recovery is recorded", playback.diagnostics().getJSONArray("recoveries").length() > 0)
                         assertEquals("Temporary Live", playback.title)
                         assertFalse(playback.diagnostics().toString().contains("127.0.0.1"))
+                        val events=diagnosticLog.snapshot().events
+                        val failure=events.first { it.message==DiagnosticMessage.PLAYBACK_FAILED }
+                        assertEquals(http,failure.details["http_status"])
+                        assertTrue(failure.details["media3_code"] is Int)
+                        assertTrue((failure.details["media3_name"] as String).startsWith("ERROR_CODE_"))
+                        assertTrue(failure.details["attempt"] is Long)
+                        assertTrue(events.any { it.message==DiagnosticMessage.RETRY_SCHEDULED })
+                        assertTrue(events.any { it.message==DiagnosticMessage.RECOVERED })
+                        assertFalse(diagnosticLog.snapshot().json().toString().contains("127.0.0.1"))
+                        assertFalse(diagnosticLog.snapshot().json().toString().contains("Temporary Live"))
                         playback.release()
                     }
                 }

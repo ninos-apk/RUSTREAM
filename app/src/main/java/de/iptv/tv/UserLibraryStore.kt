@@ -48,12 +48,14 @@ class UserLibraryStore(context: Context) {
         val json = withContext(Dispatchers.IO) {
             try { file.load().firstOrNull() } catch (error: Exception) {
                 lastError = "load_failed:${error.javaClass.simpleName}"
+                AppDiagnostics.log.failure("Storage",DiagnosticMessage.STORAGE_FAILED,ImportErrors.describe(error,"load_library"),error)
                 runCatching { if (primary.isFile) primary.copyTo(unreadable, overwrite = true) }
                 null
             }
         }
         if (json != null) try { into.restore(json) } catch (error: Exception) {
             lastError = "restore_failed:${error.javaClass.simpleName}"
+            AppDiagnostics.log.failure("Storage",DiagnosticMessage.STORAGE_FAILED,ImportErrors.describe(error,"restore_library"),error)
         }
     }
 
@@ -80,6 +82,7 @@ class UserLibraryStore(context: Context) {
             // AtomicFile keeps the previous file intact; retry this state with the next change.
             if (pending == null) pending = snapshot
             lastError = "write_failed:${error.javaClass.simpleName}"
+            AppDiagnostics.log.failure("Storage",DiagnosticMessage.STORAGE_FAILED,ImportErrors.describe(error,"write_library"),error)
         }
     }
 

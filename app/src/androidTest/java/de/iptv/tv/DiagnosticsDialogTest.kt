@@ -31,6 +31,13 @@ class DiagnosticsDialogTest {
     private fun onMain(block: () -> Unit) = instrumentation.runOnMainSync(block)
     private fun reader() = WindowInspector.getGlobalWindowViews()
         .firstNotNullOf { it.findViewWithTag<ScrollView>("diagnostics_scroll")?.takeIf { view -> view.isShown } }
+    private fun switchToJson() {
+        device.pressDPadLeft()
+        device.pressDPadRight()
+        device.pressDPadCenter()
+        device.pressDPadDown()
+        waitFor("JSON reader owns focus") { reader().hasFocus() && reader().findViewWithTag<TextView>("diagnostics_text").text.startsWith("{") }
+    }
     private fun waitFor(message: String, condition: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 5_000
         var done = false
@@ -41,6 +48,94 @@ class DiagnosticsDialogTest {
         assertTrue(message, done)
     }
 
+    @Test fun readableLogsKeepCodesSwitchWithoutLosingDataAndDoNotJumpOnNewEvents() {
+        val log = DiagnosticLog()
+        repeat(80) { index ->
+            log.record(DiagnosticLevel.INFO,"Import",DiagnosticMessage.IMPORT_COMPLETED,"count" to index)
+        }
+        log.record(DiagnosticLevel.ERROR,"Playback",DiagnosticMessage.PLAYBACK_FAILED,
+            "code" to "network_timeout","media3_code" to 2002,"attempt" to 7,"http_status" to 503)
+        val original = JSONObject().put("app_version","test").put("version_code",99).put("build_id","fixture")
+            .put("core",JSONObject().put("retained_field",42))
+            .put("previous_exit",JSONObject().put("reason",6).put("time",1234))
+        withTvActivity { scenario ->
+            lateinit var dialog: DiagnosticsDialog
+            lateinit var scroll: ScrollView
+            lateinit var origin: View
+            scenario.onTvActivity { activity ->
+                origin = checkNotNull(activity.currentFocus)
+                val english = ContextThemeWrapper(activity,activity.theme).apply {
+                    applyOverrideConfiguration(Configuration(activity.resources.configuration).apply { setLocale(java.util.Locale.US) })
+                }
+                dialog = DiagnosticsDialog(english,original.toString(2),origin,log)
+                dialog.show()
+            }
+            waitFor("Logs are the default view") {
+                scroll=reader()
+                scroll.hasFocus() && scroll.contentDescription.toString().contains("logs")
+            }
+            lateinit var displayedLogs: String
+            onMain {
+                val text=scroll.findViewWithTag<TextView>("diagnostics_text")
+                displayedLogs=text.text.toString()
+                assertTrue(displayedLogs.contains("media3_code=2002"))
+                assertTrue(displayedLogs.contains("http_status=503"))
+                assertTrue(displayedLogs.contains("attempt=7"))
+                assertTrue(displayedLogs.contains("session="))
+                assertFalse(displayedLogs.startsWith("{"))
+                val spans=text.text as android.text.Spanned
+                val colors=spans.getSpans(0,spans.length,android.text.style.ForegroundColorSpan::class.java)
+                assertTrue("Error and info use distinct labeled colors",colors.map { it.foregroundColor }.distinct().size>=3)
+            }
+            device.pressDPadRight()
+            pressFocused(By.res("android:id/button1"))
+            onMain {
+                val clipboard=instrumentation.targetContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                assertEquals(displayedLogs,clipboard.primaryClip!!.getItemAt(0).text.toString())
+            }
+            device.pressDPadUp()
+            waitFor("Reader regains focus") { scroll.hasFocus() }
+            device.pressDPadDown()
+            waitFor("Logs scroll") { scroll.scrollY>0 }
+            var oldPosition=0
+            onMain { oldPosition=scroll.scrollY }
+            switchToJson()
+            onMain {
+                val json=JSONObject(scroll.findViewWithTag<TextView>("diagnostics_text").text.toString())
+                assertEquals(42,json.getJSONObject("core").getInt("retained_field"))
+                assertEquals(6,json.getJSONObject("previous_exit").getInt("reason"))
+                assertEquals(82,json.getJSONObject("diagnostic_log").getJSONArray("events").length())
+            }
+            device.pressDPadLeft()
+            device.pressDPadLeft()
+            device.pressDPadCenter()
+            device.pressDPadDown()
+            waitFor("Switching back restores log position") { scroll.hasFocus() && scroll.scrollY==oldPosition }
+            log.record(DiagnosticLevel.WARN,"Recovery",DiagnosticMessage.RETRY_SCHEDULED,"attempt" to 7,"retry_in_ms" to 2000)
+            waitFor("New entries are offered while older entries stay fixed") {
+                dialog.window!!.decorView.findViewWithTag<Button>("diagnostics_latest").isShown
+            }
+            onMain {
+                assertEquals(oldPosition,scroll.scrollY)
+                assertFalse(scroll.findViewWithTag<TextView>("diagnostics_text").text.contains("retry_in_ms=2000"))
+            }
+            device.pressDPadLeft()
+            device.pressDPadDown()
+            waitFor("New entries action is reachable with the remote") {
+                dialog.window!!.decorView.findViewWithTag<Button>("diagnostics_latest").hasFocus()
+            }
+            device.pressDPadCenter()
+            waitFor("Latest action includes the event and scrolls to the end") {
+                val text=scroll.findViewWithTag<TextView>("diagnostics_text")
+                scroll.hasFocus() && !scroll.isLayoutRequested && !text.isLayoutRequested &&
+                    !scroll.canScrollVertically(1) && text.text.contains("retry_in_ms=2000")
+            }
+            assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null),"diagnostics-logs.png")))
+            device.pressBack()
+            waitFor("Logs restore the original focus") { !scroll.isShown && origin.hasFocus() }
+        }
+    }
+
     @Test fun realReportScrollsCopiesWithoutClosingAndRestoresFocus() {
         withTvActivity { scenario ->
             lateinit var origin: View
@@ -49,7 +144,8 @@ class DiagnosticsDialogTest {
                 MainActivity::class.java.getDeclaredMethod("diagnosticsDialog")
                     .apply { isAccessible = true }.invoke(activity)
             }
-            assertTrue(device.wait(Until.hasObject(By.desc("Diagnosebericht · Text").focused(true)), 5_000))
+            assertTrue(device.wait(Until.hasObject(By.desc("Diagnosebericht · Protokoll").focused(true)), 5_000))
+            switchToJson()
             lateinit var scroll: ScrollView
             lateinit var expected: String
             onMain {
@@ -83,7 +179,7 @@ class DiagnosticsDialogTest {
                 if (!atEnd) device.pressDPadDown()
             }
             waitFor("The final report line is reachable") { !scroll.canScrollVertically(1) }
-            device.takeScreenshot(File("/sdcard/Download/diagnostics-scrolled.png"))
+            assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null),"diagnostics-scrolled.png")))
             device.pressBack()
             waitFor("Back closes the dialog and restores the original focus") { !scroll.isShown && origin.hasFocus() }
         }
@@ -112,11 +208,15 @@ class DiagnosticsDialogTest {
                 scroll = reader()
                 scroll.hasFocus() && scroll.height > 0
             }
-            device.takeScreenshot(File("/sdcard/Download/diagnostics-large-text.png"))
+            switchToJson()
+            assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null),"diagnostics-large-text.png")))
             onMain {
                 val text = scroll.findViewWithTag<TextView>("diagnostics_text")
                 assertEquals(2f, text.resources.configuration.fontScale)
-                assertEquals(report, text.createAccessibilityNodeInfo().text.toString())
+                val displayed = JSONObject(text.createAccessibilityNodeInfo().text.toString())
+                assertEquals("Last line",displayed.getString("end_of_report"))
+                assertEquals(162,displayed.length())
+                assertTrue(displayed.has("diagnostic_log"))
                 assertFalse(scroll.canScrollHorizontally(1))
                 val availableWidth = text.width - text.totalPaddingLeft - text.totalPaddingRight
                 val widestLine = (0 until text.lineCount).maxOf { text.layout.getLineMax(it) }
@@ -135,10 +235,18 @@ class DiagnosticsDialogTest {
                 }
             }
             waitFor("Accessibility scroll moves the text") { scroll.scrollY > 0 }
+            // Accessibility page scrolls animate even when D-pad scrolling is immediate. Let the
+            // native animation finish before asking fullScroll to jump to a different target.
+            var previousY = -1
+            var stableSince = SystemClock.elapsedRealtime()
+            waitFor("Accessibility page scroll settles") {
+                if (scroll.scrollY != previousY) { previousY=scroll.scrollY;stableSince=SystemClock.elapsedRealtime() }
+                SystemClock.elapsedRealtime()-stableSince>=300
+            }
             onMain { scroll.fullScroll(View.FOCUS_DOWN) }
             waitFor("Large text can reach the end") { !scroll.canScrollVertically(1) }
             onMain { assertTrue(scroll.createAccessibilityNodeInfo().actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD }) }
-            device.takeScreenshot(File("/sdcard/Download/diagnostics-large-text.png"))
+            assertTrue(device.takeScreenshot(File(instrumentation.targetContext.getExternalFilesDir(null),"diagnostics-large-text.png")))
             onMain { assertTrue(scroll.performAccessibilityAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD, null)) }
             waitFor("Accessibility can return from the end") { scroll.canScrollVertically(1) }
             onMain { dialog.dismiss() }

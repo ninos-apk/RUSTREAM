@@ -40,6 +40,7 @@ class PlaybackController(
     private val view: PlayerView,
     private val status: (String) -> Unit,
     private val metrics: (PlaybackStats) -> Unit = {},
+    private val log: DiagnosticLog = AppDiagnostics.log,
 ) {
     var player: ExoPlayer? = null; private set
     private var session: MediaSession? = null
@@ -125,6 +126,7 @@ class PlaybackController(
                                     receivedBytes = ingress.totalBytes,
                                 )) {
                                 // Rust owns the backoff and preserves the position reported above.
+                                recordRecovery("vod_refill_stall", rate)
                                 apply(core.call("ended", "attempt" to attempt, "error" to true))
                             }
                             publishStats(rate)
@@ -136,6 +138,8 @@ class PlaybackController(
                     }
                 } catch (error: Exception) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
+                    log.failure("Playback",DiagnosticMessage.OPERATION_FAILED,ImportErrors.describe(error,"playback_control"),error,
+                        "attempt" to attempt)
                     status(context.getString(R.string.playback_control_failed))
                 }
                 delay(1_000)
@@ -150,6 +154,7 @@ class PlaybackController(
         releasePlayer()
         phase = "idle"
         metrics(PlaybackStats())
+        log.record(DiagnosticLevel.INFO,"Playback",DiagnosticMessage.PLAYBACK_STATE,"phase" to "suspended","attempt" to attempt)
     }
     suspend fun togglePause() = operations.withLock {
         userPaused = player?.playWhenReady ?: !userPaused
@@ -167,6 +172,7 @@ class PlaybackController(
         if (selected) { terminal = false; userPaused = false; apply(core.call("reconnect")) }
     }
     suspend fun stop() = operations.withLock {
+        val wasSelected = selected
         selected = false; terminal = false
         title = ""
         core.call("stop")
@@ -174,6 +180,7 @@ class PlaybackController(
         phase = "idle"
         metrics(PlaybackStats())
         status(context.getString(R.string.playback_stopped))
+        if (wasSelected) log.record(DiagnosticLevel.INFO,"Playback",DiagnosticMessage.PLAYBACK_STATE,"phase" to "stopped","attempt" to attempt)
     }
     suspend fun seek(deltaMs: Long) = operations.withLock {
         val p = player ?: return@withLock
@@ -200,6 +207,8 @@ class PlaybackController(
             val previousPhase = phase
             lastCoreHealth = command
             phase = command.optString("phase", phase)
+            if (phase != previousPhase) log.record(DiagnosticLevel.INFO,"Playback",DiagnosticMessage.PLAYBACK_STATE,
+                "phase" to phase,"attempt" to attempt,"buffered_ms" to player?.totalBufferedDuration)
             if (phase == "waiting") {
                 if (previousPhase != "waiting") {
                     recordRecovery(command.optString("recovery_reason", "unknown"))
@@ -232,6 +241,8 @@ class PlaybackController(
         title = command.getString("name")
         phase = "connecting"
         live = command.getBoolean("live")
+        log.record(DiagnosticLevel.INFO,"Playback",DiagnosticMessage.PLAYBACK_STARTED,
+            "attempt" to attempt,"live" to live,"profile" to bufferProfile.key)
         ingress = IngressMeter().apply { sample(SystemClock.elapsedRealtime()) }
         lastIngressRate = null
         val http = DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(15_000)
@@ -268,6 +279,7 @@ class PlaybackController(
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== p || attempt != token) return
                 val httpCode = generateSequence(error as Throwable) { it.cause }
+                    .take(12)
                     .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
                 val detail=when {
                     httpCode!=null->ImportErrors.describe(ImportFailure("http_$httpCode","playback",httpCode))
@@ -275,7 +287,14 @@ class PlaybackController(
                     error.errorCode in setOf(PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED)->ImportErrors.describe(ImportFailure("format_unsupported","playback"))
                     else->ImportErrors.describe(error,"playback")
                 }
-                lastError=detail.json().put("media3_code",error.errorCode).put("cause_types",org.json.JSONArray(generateSequence(error as Throwable){it.cause}.take(12).map{it.javaClass.simpleName}.toList()))
+                lastError=detail.json().put("media3_code",error.errorCode).put("media3_name",error.errorCodeName)
+                    .put("attempt",token).put("time_ms",System.currentTimeMillis())
+                    .put("cause_types",org.json.JSONArray(generateSequence(error as Throwable){it.cause}.take(12).map{it.javaClass.simpleName}.toList()))
+                log.failure("Playback",DiagnosticMessage.PLAYBACK_FAILED,detail,error,
+                    "attempt" to token,"media3_code" to error.errorCode,"media3_name" to error.errorCodeName,
+                    "terminal" to PlaybackRecoveryPolicy.terminal(live,httpCode,error.errorCode),
+                    "buffered_ms" to p.totalBufferedDuration,"position_ms" to p.currentPosition,
+                    "received_bytes" to ingress.totalBytes,"ingress_bytes_per_second" to lastIngressRate)
                 // Permanent errors need user action, rather than an endless credential/codec retry loop.
                 if (PlaybackRecoveryPolicy.terminal(live, httpCode, error.errorCode)) {
                     terminal = true
@@ -286,6 +305,10 @@ class PlaybackController(
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (player !== p || attempt != token) return
+                log.record(DiagnosticLevel.INFO,"Playback",DiagnosticMessage.PLAYBACK_STATE,
+                    "attempt" to token,"player_state" to playbackState,
+                    "phase" to when(playbackState) { Player.STATE_BUFFERING -> "buffering"; Player.STATE_READY -> "ready"; Player.STATE_ENDED -> "ended"; else -> "idle" },
+                    "buffered_ms" to p.totalBufferedDuration)
                 if (playbackState == Player.STATE_ENDED) sample(p, PlaybackSample.Event.ENDED)
                 if (playbackState == Player.STATE_ENDED) scope.launch { operations.withLock { if (player === p && attempt == token) apply(core.call("ended", "attempt" to token, "error" to false)) } }
             }
@@ -313,6 +336,9 @@ class PlaybackController(
         if (retry?.isActive == true || !foreground || userPaused || terminal || !selected) return
         val token = attempt
         val waitMs = command.optLong("retry_in_ms", 1_000).coerceAtLeast(1)
+        log.record(DiagnosticLevel.WARN,"Recovery",DiagnosticMessage.RETRY_SCHEDULED,
+            "attempt" to token,"retry_in_ms" to waitMs,"retries" to command.optInt("retries"),
+            "reason" to command.optString("recovery_reason","unknown"))
         retry = scope.launch {
             delay(waitMs)
             operations.withLock {
@@ -341,11 +367,18 @@ class PlaybackController(
     /** Bounded, credential-free snapshots for distinguishing transport and renderer stalls. */
     private fun recordRecovery(reason: String, rate: Long? = lastIngressRate) {
         val current = player
-        recoveryEvents.addLast(JSONObject().put("reason", reason).put("attempt", attempt)
+        val event = JSONObject().put("reason", reason).put("attempt", attempt).put("time_ms",System.currentTimeMillis())
             .put("elapsed_ms", SystemClock.elapsedRealtime()).put("buffered_ms", current?.totalBufferedDuration)
             .put("player_state", current?.playbackState).put("position_ms", current?.currentPosition)
             .put("received_bytes", ingress.totalBytes).put("ingress_bytes_per_second", rate)
-            .put("video_frames", videoFrames.get()).put("media3_code", lastError?.optInt("media3_code")))
+            .put("video_frames", videoFrames.get()).put("media3_code", lastError?.optInt("media3_code"))
+        recoveryEvents.addLast(event)
+        log.record(if(reason=="recovered") DiagnosticLevel.INFO else DiagnosticLevel.WARN,"Recovery",
+            if(reason=="recovered") DiagnosticMessage.RECOVERED else DiagnosticMessage.RECOVERY,
+            "reason" to reason,"attempt" to attempt,"buffered_ms" to current?.totalBufferedDuration,
+            "player_state" to current?.playbackState,"position_ms" to current?.currentPosition,
+            "received_bytes" to ingress.totalBytes,"ingress_bytes_per_second" to rate,"video_frames" to videoFrames.get(),
+            "media3_code" to lastError?.opt("media3_code"))
         while (recoveryEvents.size > 20) recoveryEvents.removeFirst()
     }
     fun diagnostics(): JSONObject = JSONObject().put("profile", bufferProfile.key).put("live", live)
@@ -358,6 +391,8 @@ class PlaybackController(
         } catch (error: Exception) {
             // History must never interrupt playback.
             lastError = JSONObject().put("history_error", error.javaClass.simpleName)
+            log.failure("Storage",DiagnosticMessage.STORAGE_FAILED,ImportErrors.describe(error,"record_history"),error,
+                "attempt" to attempt)
         }
     }
     fun releasePlayer() {

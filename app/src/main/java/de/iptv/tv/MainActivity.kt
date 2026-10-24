@@ -173,6 +173,12 @@ class MainActivity : ComponentActivity() {
     private var sources = mutableListOf<JSONObject>()
     private var activeSource: JSONObject? = null
     private var lastFailure: JSONObject? = null
+        set(value) {
+            field = value
+            if (value != null) AppDiagnostics.log.record(DiagnosticLevel.ERROR,"App",DiagnosticMessage.OPERATION_FAILED,
+                "code" to value.optString("code"),"domain" to value.optString("domain"),"stage" to value.optString("stage"),
+                "http_status" to value.opt("http_status"),"exception_type" to value.optString("exception_type"))
+        }
     private var revision = 0L
     private var category: Long? = null
     private var kind = "live"
@@ -213,6 +219,7 @@ class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(AppLanguage.wrap(newBase)) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppDiagnostics.log // Begin the process session before loading the catalog.
         artwork=ArtworkLoader(applicationContext)
         metadataStore=MetadataStore(applicationContext)
         metadata=MetadataService(metadataStore.cache,{metadataStore.token})
@@ -1689,6 +1696,9 @@ class MainActivity : ComponentActivity() {
         val returnFocus=currentFocus ?: settingsButton
         launchSafe {
         val report=JSONObject().put("app_version",BuildConfig.VERSION_NAME).put("version_code",BuildConfig.VERSION_CODE)
+            .put("snapshot_at",System.currentTimeMillis())
+            .put("device",JSONObject().put("manufacturer",android.os.Build.MANUFACTURER).put("model",android.os.Build.MODEL)
+                .put("android",android.os.Build.VERSION.RELEASE).put("sdk",android.os.Build.VERSION.SDK_INT))
             .put("build_id",BuildConfig.CORE_BUILD_ID)
             .put("core",core.call("info")).put("import",loader.lastReport).put("last_error",lastFailure?:JSONObject.NULL)
             .put("playback_error",playback.lastError?:JSONObject.NULL)
