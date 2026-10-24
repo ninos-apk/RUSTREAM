@@ -19,7 +19,7 @@ android {
         minSdk = 23
         targetSdk = 36
         versionCode = 21
-        versionName = "0.5.10"
+        versionName = "0.5.11"
         val digest = MessageDigest.getInstance("SHA-256")
         rootProject.fileTree("crates").matching { include("**/*.rs", "**/Cargo.toml") }.files.sortedBy { it.path }.forEach { digest.update(it.readBytes()) }
         buildConfigField("String", "CORE_BUILD_ID", "\"" + digest.digest().joinToString("") { "%02x".format(it) }.take(16) + "\"")
