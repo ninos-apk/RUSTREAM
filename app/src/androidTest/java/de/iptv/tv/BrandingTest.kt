@@ -56,9 +56,9 @@ class BrandingTest {
                 device.executeShellCommand("screencap -p /sdcard/Download/rustream-startup.png")
                 device.pressDPadCenter()
                 assertTrue(device.wait(Until.hasObject(By.text("Einstellungen")),5_000))
-                assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
+                assertTrue(device.wait(Until.hasObject(By.text("Playlist hinzufügen").focused(true)),5_000))
                 // Remote navigation scrolls the existing settings menu down to its final action.
-                repeat(10){device.pressDPadDown()}
+                repeat(8){device.pressDPadDown()}
                 assertTrue(device.wait(Until.hasObject(By.text("App-Info").focused(true)),5_000))
                 device.pressDPadCenter()
                 // The app shows its own language (AppLanguage), not necessarily the emulator system language.
@@ -83,7 +83,7 @@ class BrandingTest {
         fun chooseLanguage(settings:String,entry:String,index:Int){
             device.pressDPadCenter()
             assertTrue(device.wait(Until.hasObject(By.text(settings)),5_000))
-            repeat(8){device.pressDPadDown()}
+            repeat(5){device.pressDPadDown()}
             assertTrue(device.wait(Until.hasObject(By.text(entry).focused(true)),5_000))
             device.pressDPadCenter()
             assertTrue(device.wait(Until.hasObject(By.text("English")),5_000))

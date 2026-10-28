@@ -299,8 +299,9 @@ class TvEndToEndTest {
                     assertTrue(root.descendants.first { it.contentDescription=="Einstellungen" }.requestFocus())
                 }
                 device.pressDPadCenter()
-                assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten")),5000))
-                assertTrue(device.hasObject(By.text("URL hinzufügen")))
+                assertTrue(device.wait(Until.hasObject(By.text("Playlists verwalten")),5000))
+                assertTrue(device.hasObject(By.text("Playlist hinzufügen")))
+                assertFalse(device.hasObject(By.text("URL hinzufügen")))
                 device.pressBack()
                 assertTrue(device.wait(Until.hasObject(By.desc("Einstellungen").focused(true)),5000))
                 fun scrollTo(position: Int) { scenario.onTvActivity { activity ->

@@ -1,0 +1,18 @@
+{
+  "version": "0.5.12",
+  "reviewed": true,
+  "de": [
+    "Die Kopfzeile zeigt das heutige Datum, ein Wettersymbol und die Temperatur in Celsius neben der Uhr. Der ungefähre Ort wird automatisch über die Internetverbindung ermittelt.",
+    "Die Wetteranzeige unterscheidet Tag und Nacht sowie Sonne, Wolken, Regen, Schnee, Nebel und Gewitter. Wetterdaten werden alle 15 Minuten aktualisiert; ohne aktuelle Daten erscheint eine neutrale Anzeige.",
+    "Playlist hinzufügen öffnet einen Assistenten für Datei, URL oder Xtream-Anmeldung. Beim Abbrechen kehrst du zur Methodenauswahl zurück.",
+    "Die Einstellungen sind in Playlists, Wiedergabe und App gegliedert. Quellen verwalten heißt jetzt Playlists verwalten; TMDB-Einstellungen und manueller EPG-Import sind ausgeblendet.",
+    "Überlappungen in der Kopfzeile sind behoben. Die neuen Menüs unterstützen große Schrift, lange Beschriftungen, RTL und die Navigation mit der Fernbedienung."
+  ],
+  "en": [
+    "The header shows today's date, a weather icon and the temperature in Celsius next to the clock. Your approximate location is determined automatically from the Internet connection.",
+    "Weather icons distinguish day and night, sun, clouds, rain, snow, fog and thunderstorms. Weather refreshes every 15 minutes and shows a neutral placeholder when current data is unavailable.",
+    "Add playlist opens a wizard for a file, URL or Xtream sign-in. Cancelling returns you to the method chooser.",
+    "Settings is grouped into Playlists, Playback and App. Manage sources is now Manage playlists; TMDB settings and manual EPG import are hidden.",
+    "Header overlaps are fixed. The new menus support large text, long labels, RTL layouts and remote navigation."
+  ]
+}

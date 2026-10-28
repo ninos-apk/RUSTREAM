@@ -80,9 +80,9 @@ class UiDesignTest {
             store.save(emptyList())
             withTvActivity {
                 pressFocused(By.text("Quelle hinzufügen"),10_000)
-                assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
-                device.pressDPadDown();device.pressDPadDown()
-                pressFocused(By.text("URL hinzufügen"))
+                pressFocused(By.text("Playlist hinzufügen"))
+                device.pressDPadDown()
+                pressFocused(By.textStartsWith("URL hinzufügen"))
                 assertTrue(device.wait(Until.hasObject(By.desc("HTTP(S)-URL")),5_000))
                 device.findObject(By.desc("Name")).text="UI behalten"
                 device.findObject(By.desc("HTTP(S)-URL")).text="ungueltig"
@@ -183,7 +183,8 @@ class UiDesignTest {
                 assertTrue(device.wait(Until.hasObject(By.desc("Removal Demo").focused(true)),10_000))
                 scenario.onTvActivity { activity -> assertTrue(activity.findViewById<ViewGroup>(android.R.id.content).descendants.first { it.contentDescription=="Einstellungen" }.requestFocus()) }
                 pressFocused(By.desc("Einstellungen"))
-                pressFocused(By.text("Quellen verwalten"))
+                device.pressDPadDown()
+                pressFocused(By.text("Playlists verwalten"))
                 assertTrue(device.wait(Until.hasObject(By.text("Gespeicherte Playlists")),5_000))
                 // The playlist list has focus; "Entfernen" is the leftmost action of the button bar below it.
                 device.pressDPadDown();device.pressDPadLeft()

@@ -17,6 +17,8 @@ Dieses Projekt übernimmt GPL-3.0-or-later-Code aus dem lokalen Windows-IPTV-Pla
 | OkHttp / Okio | Quellenimport | Apache-2.0, https://square.github.io/okhttp/ |
 | desugar_jdk_libs | Java-Zeit-API auf älteren Geräten | GPL-2.0 with Classpath Exception, https://github.com/google/desugar_jdk_libs |
 | JUnit / AndroidX Test | Tests, nicht App-Funktionen | EPL-1.0 / Apache-2.0 |
+| Open-Meteo | Wetterdaten; Temperatur auf ganze Grad gerundet | Daten: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), [Open-Meteo](https://open-meteo.com/) |
+| ipwho.is | Ungefähre Ortsbestimmung anhand der öffentlichen IP-Adresse | Externer Dienst, [Dokumentation](https://ipwhois.io/documentation) |
 
 Exakte Rust-Auflösung: `Cargo.lock`; Android-Versionen: `app/build.gradle.kts`. Transitive Lizenzhinweise sind vor öffentlicher Distribution anhand der aufgelösten Abhängigkeiten zu vervollständigen. Windows-mpv, FFmpeg und NVIDIA-Runtime werden nicht in das App-APK übernommen. Das Testvideo ist selbst erzeugtes FFmpeg-Testbild mit synthetischem Sinuston und liegt ausschließlich im Test-APK.
 

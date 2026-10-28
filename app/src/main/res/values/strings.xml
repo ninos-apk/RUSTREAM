@@ -196,7 +196,17 @@
 
     <!-- Settings -->
     <string name="settings_section">Quellen &amp; Wiedergabe</string>
-    <string name="settings_sources">Quellen verwalten</string>
+    <string name="settings_sources">Playlists verwalten</string>
+    <string name="settings_add_playlist">Playlist hinzufügen</string>
+    <string name="settings_playlists">Playlists</string>
+    <string name="settings_playback">Wiedergabe</string>
+    <string name="settings_app">App</string>
+    <string name="playlist_method_hint">Wie möchtest du deine Playlist hinzufügen?</string>
+    <string name="playlist_file_hint">Playlist-Datei vom Gerät oder einem Speicher auswählen.</string>
+    <string name="playlist_url_hint">HTTP(S)-Adresse einer M3U-Playlist eingeben.</string>
+    <string name="playlist_xtream_hint">Mit Server-Adresse, Benutzername und Passwort anmelden.</string>
+    <string name="playlist_back">Zurück</string>
+    <string name="playlist_empty">Noch keine Playlists vorhanden. Füge eine Playlist hinzu, um zu starten.</string>
     <string name="settings_add_file">Datei hinzufügen</string>
     <string name="settings_add_url">URL hinzufügen</string>
     <string name="settings_xtream">Xtream anmelden</string>
@@ -369,4 +379,19 @@
     <string name="updates_error_download">Download fehlgeschlagen. Mit „Jetzt aktualisieren“ erneut versuchen.</string>
     <string name="updates_error_install">Installation abgebrochen oder fehlgeschlagen. Die bisherige Version bleibt nutzbar. Erneut versuchen.</string>
     <string name="updates_error_permission">Installation nicht erlaubt. In den TV-Einstellungen die Installation unbekannter Apps für RuStream erlauben. Danach erneut versuchen.</string>
+    <string name="weather_loading">Wetter wird geladen</string>
+    <string name="about_weather">Wetterdaten: Open-Meteo (open-meteo.com), CC BY 4.0. Automatische ungefähre Ortsbestimmung über ipwho.is anhand der öffentlichen IP-Adresse. Die Koordinaten werden für die Wetterabfrage an Open-Meteo übermittelt.</string>
+    <string name="weather_unavailable">Wetter nicht verfügbar</string>
+    <string name="weather_description">Wetter in %1$s: %2$s, %3$s</string>
+    <string name="weather_sunny">Sonnig</string>
+    <string name="weather_clear_night">Klare Nacht</string>
+    <string name="weather_partly_cloudy">Teilweise bewölkt</string>
+    <string name="weather_partly_cloudy_night">Teilweise bewölkte Nacht</string>
+    <string name="weather_cloudy">Bewölkt</string>
+    <string name="weather_fog">Nebel</string>
+    <string name="weather_rain">Regen</string>
+    <string name="weather_sleet">Gefrierender Regen</string>
+    <string name="weather_snow">Schnee</string>
+    <string name="weather_thunderstorm">Gewitter</string>
+    <string name="weather_unknown">Wetterlage unbekannt</string>
 </resources>

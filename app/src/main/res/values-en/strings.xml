@@ -192,7 +192,17 @@
 
     <!-- Settings -->
     <string name="settings_section">Sources &amp; playback</string>
-    <string name="settings_sources">Manage sources</string>
+    <string name="settings_sources">Manage playlists</string>
+    <string name="settings_add_playlist">Add playlist</string>
+    <string name="settings_playlists">Playlists</string>
+    <string name="settings_playback">Playback</string>
+    <string name="settings_app">App</string>
+    <string name="playlist_method_hint">Choose how to add your playlist.</string>
+    <string name="playlist_file_hint">Choose a playlist file from your device or storage.</string>
+    <string name="playlist_url_hint">Enter the HTTP(S) address of an M3U playlist.</string>
+    <string name="playlist_xtream_hint">Sign in with your server address, username and password.</string>
+    <string name="playlist_back">Back</string>
+    <string name="playlist_empty">No playlists yet. Add a playlist to get started.</string>
     <string name="settings_add_file">Add file</string>
     <string name="settings_add_url">Add URL</string>
     <string name="settings_xtream">Xtream sign-in</string>
@@ -365,4 +375,19 @@
     <string name="updates_error_download">Download failed. Select Update now to try again.</string>
     <string name="updates_error_install">Installation was cancelled or failed. Your current version remains available. Try again.</string>
     <string name="updates_error_permission">Installation is not allowed. In TV settings, allow RuStream to install unknown apps, then try again.</string>
+    <string name="weather_loading">Loading weather</string>
+    <string name="about_weather">Weather data: Open-Meteo (open-meteo.com), CC BY 4.0. Approximate location is determined automatically by ipwho.is using the public IP address. The coordinates are sent to Open-Meteo for the weather request.</string>
+    <string name="weather_unavailable">Weather unavailable</string>
+    <string name="weather_description">Weather in %1$s: %2$s, %3$s</string>
+    <string name="weather_sunny">Sunny</string>
+    <string name="weather_clear_night">Clear night</string>
+    <string name="weather_partly_cloudy">Partly cloudy</string>
+    <string name="weather_partly_cloudy_night">Partly cloudy night</string>
+    <string name="weather_cloudy">Cloudy</string>
+    <string name="weather_fog">Fog</string>
+    <string name="weather_rain">Rain</string>
+    <string name="weather_sleet">Freezing rain</string>
+    <string name="weather_snow">Snow</string>
+    <string name="weather_thunderstorm">Thunderstorm</string>
+    <string name="weather_unknown">Unknown conditions</string>
 </resources>

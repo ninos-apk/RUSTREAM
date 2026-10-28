@@ -49,9 +49,9 @@ class UiPreviewTest {
             withTvActivity { scenario ->
                 scenario.onTvActivity { libraryStore=field(it,"libraryStore") as UserLibraryStore }
                 pressFocused(By.text("Quelle hinzufügen"),10_000)
-                assertTrue(device.wait(Until.hasObject(By.text("Quellen verwalten").focused(true)),5_000))
-                device.pressDPadDown();device.pressDPadDown()
-                pressFocused(By.text("URL hinzufügen"))
+                pressFocused(By.text("Playlist hinzufügen"))
+                device.pressDPadDown()
+                pressFocused(By.textStartsWith("URL hinzufügen"))
                 assertTrue(device.wait(Until.hasObject(By.desc("HTTP(S)-URL")),5_000))
                 device.findObject(By.desc("Name")).text="UI Demo"
                 device.findObject(By.desc("HTTP(S)-URL")).text=url

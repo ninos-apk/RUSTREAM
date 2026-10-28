@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var epg: TextView
     private lateinit var toolbar: LinearLayout
+    private lateinit var weatherHeader: WeatherHeader
     private lateinit var categorySearch: EditText
     private lateinit var channelSearch: EditText
     private lateinit var categoryEmpty: TextView
@@ -200,6 +201,7 @@ class MainActivity : ComponentActivity() {
     private var busy = false
     private var firstChannelFocus = true
     private var lifecycleWork: Job? = null
+    private var playlistPickerReturn: (() -> Unit)? = null
     private val channelRows = Rows(true) { item -> when{
         !item.available->status.text=getString(R.string.item_unavailable,item.title)
         item.series->openSeries(item.id);kind=="movies"->openMovie(item);else->selectChannel(item.id)} }
@@ -314,7 +316,18 @@ class MainActivity : ComponentActivity() {
             tabs.addView(tab,LinearLayout.LayoutParams(-2,-2).apply { marginEnd=dp(6) })
             if(key=="unclassified")tab.visibility=View.GONE
         }
-        toolbar.addView(HorizontalScrollView(this).apply{isHorizontalScrollBarEnabled=false;addView(tabs)},LinearLayout.LayoutParams(0,-2,1f))
+        toolbar.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled=false
+            // The toolbar allows enlarged focus rings, but scrolling tabs must stay
+            // inside their viewport instead of painting over the date and weather.
+            outlineProvider=android.view.ViewOutlineProvider.BOUNDS
+            clipToOutline=true
+            setPadding(dp(3),dp(3),dp(3),dp(3))
+            clipToPadding=false
+            addView(tabs)
+        },LinearLayout.LayoutParams(0,-2,1f))
+        weatherHeader = WeatherHeader(this)
+        toolbar.addView(weatherHeader,LinearLayout.LayoutParams(-2,-2).apply { marginStart=dp(12) })
         toolbar.addView(TextClock(this).apply {
             tag = "navbar_clock"
             // Native TextClock follows device time/timezone and only ticks while visible.
@@ -634,35 +647,40 @@ class MainActivity : ComponentActivity() {
     private fun artworkAddress(rev:Long,id:Long,series:Boolean):suspend ()->String?={
         core.call("artwork","revision" to rev,"id" to id,"series" to series).optString("url").takeIf{it.isNotEmpty()&&it!="null"}
     }
-    private fun settingsDialog() {
-        val choices=listOf(R.string.settings_sources,R.string.settings_add_file,R.string.settings_add_url,R.string.settings_xtream,R.string.settings_epg,R.string.settings_picture,
-            R.string.settings_buffer,R.string.settings_history,R.string.settings_language,R.string.settings_diagnostics,R.string.app_info,R.string.metadata_settings,R.string.updates_title).map { getString(it) }
-        val dialog=AlertDialog.Builder(this).create()
-        val menu=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(20),dp(18),dp(16))
-            background=TvUi.surface(TvUi.panel,dp(10).toFloat())
-        }
-        menu.addView(label(getString(R.string.settings),20f),LinearLayout.LayoutParams(-1,-2))
-        menu.addView(label(getString(R.string.settings_section),12f).apply { setTextColor(TvUi.muted); setPadding(0,dp(10),0,dp(10)) },LinearLayout.LayoutParams(-1,-2))
-        val actions=choices.mapIndexed { index,choice ->
-            button(choice) {
-                    dialog.dismiss()
-                    when(index) { 0->chooseSources(); 1->pickDocument(false); 2->urlDialog(false); 3->xtreamDialog(); 4->epgDialog(); 5->pictureDialog(); 6->bufferDialog(); 7->historyDialog(); 8->languageDialog(); 9->diagnosticsDialog(); 10->appInfoDialog();11->metadataSettings();12->showUpdates() }
-            }.apply {
-                menu.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(4) })
+    private fun settingsDialog(focusItem: Int = R.string.settings_add_playlist) {
+        TvMenuDialog(this, R.string.settings, listOf(
+            MenuSection(R.string.settings_playlists, listOf(
+                MenuAction(R.string.settings_add_playlist) { addPlaylistWizard() },
+                MenuAction(R.string.settings_sources) { chooseSources() }
+            )),
+            MenuSection(R.string.settings_playback, listOf(
+                MenuAction(R.string.settings_picture) { pictureDialog() },
+                MenuAction(R.string.settings_buffer) { bufferDialog() },
+                MenuAction(R.string.settings_history) { historyDialog() }
+            )),
+            MenuSection(R.string.settings_app, listOf(
+                MenuAction(R.string.settings_language) { languageDialog() },
+                MenuAction(R.string.updates_title) { showUpdates() },
+                MenuAction(R.string.settings_diagnostics) { diagnosticsDialog() },
+                MenuAction(R.string.app_info) { appInfoDialog() }
+            ))
+        ), focusItem, onDismiss = {
+            if (startup.visibility == View.VISIBLE) startup.focusPrimary() else settingsButton.requestFocus()
+        }).show()
+    }
+    private fun addPlaylistWizard(focusItem: Int = R.string.settings_add_file) {
+        TvMenuDialog(this, R.string.settings_add_playlist, listOf(MenuSection(null, listOf(
+            MenuAction(R.string.settings_add_file, R.string.playlist_file_hint) {
+                pickDocument(false) { addPlaylistWizard(R.string.settings_add_file) }
+            },
+            MenuAction(R.string.settings_add_url, R.string.playlist_url_hint) {
+                urlDialog(false) { addPlaylistWizard(R.string.settings_add_url) }
+            },
+            MenuAction(R.string.settings_xtream, R.string.playlist_xtream_hint) {
+                xtreamDialog { addPlaylistWizard(R.string.settings_xtream) }
             }
-        }
-        menu.addView(label(getString(R.string.settings_back_hint),11f).apply { setTextColor(TvUi.muted); setPadding(0,dp(8),0,0) },LinearLayout.LayoutParams(-1,-2))
-        dialog.setView(ScrollView(this).apply { isFillViewport=false; addView(menu) },0,0,0,0)
-        dialog.setOnDismissListener { if(startup.visibility==View.VISIBLE) startup.focusPrimary() else settingsButton.requestFocus() }
-        dialog.show()
-        dialog.window?.apply {
-            setBackgroundDrawableResource(android.R.color.transparent)
-            setLayout(dp(if(resources.configuration.fontScale>1.3f)460 else 310),dp(resources.configuration.screenHeightDp-36))
-            setGravity(Gravity.END or Gravity.CENTER_VERTICAL)
-            attributes=attributes.apply { x=dp(18); dimAmount=0.55f }
-        }
-        actions.first().requestFocus()
+        ))), focusItem, sidePanel = false, introduction = R.string.playlist_method_hint,
+            onCancel = { settingsDialog(R.string.settings_add_playlist) }).show()
     }
     private fun pictureDialog() {
         AlertDialog.Builder(this).setTitle(R.string.picture_title)
@@ -689,6 +707,7 @@ class MainActivity : ComponentActivity() {
         }
         paragraph(R.string.about_intro)
         paragraph(R.string.about_technology)
+        paragraph(R.string.about_weather)
         paragraph(R.string.about_independent)
         paragraph(R.string.about_support_title,true)
         paragraph(R.string.about_support_body)
@@ -1185,6 +1204,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
+        if (::weatherHeader.isInitialized) weatherHeader.start(scope)
         if (::updates.isInitialized) updates.start()
         if(::channels.isInitialized)channels.post{scheduleMetadata()}
         detailRow?.let{row->metadataItem(row)?.let{loadMovieDetails(it,row)}}
@@ -1204,6 +1224,7 @@ class MainActivity : ComponentActivity() {
         if (first.requestFocus()) firstChannelFocus = false
     }
     override fun onStop() {
+        if (::weatherHeader.isInitialized) weatherHeader.stop()
         if (::updates.isInitialized) updates.stop()
         metadataWork?.cancel();detailWork?.cancel()
         if (::playerPane.isInitialized) playerPane.cancelSeek()
@@ -1517,7 +1538,16 @@ class MainActivity : ComponentActivity() {
         updateEpisodeNavigation()
     }
     private fun chooseSources() {
-        if (sources.isEmpty()) { settingsDialog(); return }
+        if (sources.isEmpty()) {
+            val dialog = AlertDialog.Builder(this).setTitle(R.string.settings_sources).setMessage(R.string.playlist_empty)
+                .setPositiveButton(R.string.settings_add_playlist) { _, _ -> addPlaylistWizard() }
+                .setNegativeButton(R.string.close, null).create()
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply { isFocusableInTouchMode = true; requestFocus() }
+            }
+            dialog.show()
+            return
+        }
         AlertDialog.Builder(this).setTitle(R.string.saved_playlists)
             .setItems(sources.map { it.optString("name", "Playlist") }.toTypedArray()) { _, i -> launchSafe { importSource(sources[i], false) } }
             .setNeutralButton(R.string.remove) { _, _ -> removeSource() }.setNegativeButton(R.string.close, null).show()
@@ -1550,14 +1580,14 @@ class MainActivity : ComponentActivity() {
                 confirm.getButton(AlertDialog.BUTTON_NEGATIVE).apply { isFocusableInTouchMode=true;requestFocus() }
             }.setNegativeButton(R.string.cancel, null).show()
     }
-    private fun urlDialog(isEpg: Boolean) {
-        form(getString(if (isEpg) R.string.xmltv_address else R.string.playlist_address), listOf(getString(R.string.field_name), getString(R.string.field_url)), foregroundImport=!isEpg) { values ->
+    private fun urlDialog(isEpg: Boolean, onCancelled: (() -> Unit)? = null) {
+        form(getString(if (isEpg) R.string.xmltv_address else R.string.playlist_address), listOf(getString(R.string.field_name), getString(R.string.field_url)), foregroundImport=!isEpg, onCancelled=onCancelled) { values ->
             val source = JSONObject().put("kind", "url").put("name", values[0].ifBlank { if (isEpg) "EPG" else "Playlist" }).put("url", values[1])
             if (isEpg) importGuide(source) else importSource(source, true)
         }
     }
-    private fun xtreamDialog() {
-        form(getString(R.string.xtream_title), listOf(getString(R.string.field_name), getString(R.string.field_server), getString(R.string.field_username), getString(R.string.field_password)), 3, foregroundImport=true) { v ->
+    private fun xtreamDialog(onCancelled: (() -> Unit)? = null) {
+        form(getString(R.string.xtream_title), listOf(getString(R.string.field_name), getString(R.string.field_server), getString(R.string.field_username), getString(R.string.field_password)), 3, foregroundImport=true, onCancelled=onCancelled) { v ->
             val source = JSONObject().put("kind", "xtream").put("name", v[0].ifBlank { "Xtream" }).put("server", v[1]).put("username", v[2]).put("password", v[3]).put("vod", true)
             importSource(source, true)
         }
@@ -1566,7 +1596,7 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this).setTitle(R.string.epg_title)
             .setItems(arrayOf(getString(R.string.epg_open_file), getString(R.string.epg_http_address))) { _, i -> if (i == 0) pickDocument(true) else urlDialog(true) }.setNegativeButton(R.string.cancel, null).show()
     }
-    private fun form(title: String, hints: List<String>, passwordIndex: Int = -1, foregroundImport:Boolean=false, submit: suspend (List<String>) -> Unit) {
+    private fun form(title: String, hints: List<String>, passwordIndex: Int = -1, foregroundImport:Boolean=false, onCancelled:(() -> Unit)?=null, submit: suspend (List<String>) -> Unit) {
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24),dp(8),dp(24),dp(8)) }
         val fields = hints.mapIndexed { i, hint -> EditText(this).apply {
             id=View.generateViewId();isSingleLine = true; textSize = 18f
@@ -1584,6 +1614,7 @@ class MainActivity : ComponentActivity() {
         fun cancelForm() {
             work?.cancel()
             if(!libraryReady){chrome.visibility=View.INVISIBLE;startup.showEmpty()}
+            onCancelled?.invoke()
         }
         val dialog=AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(layout) })
             .setPositiveButton(R.string.apply,null).setNegativeButton(R.string.cancel){_,_->cancelForm()}.create()
@@ -1615,15 +1646,25 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private fun pickDocument(isEpg: Boolean) {
+    private fun pickDocument(isEpg: Boolean, onCancelled: (() -> Unit)? = null) {
+        if (!isEpg) playlistPickerReturn = onCancelled
         try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }, if (isEpg) 101 else 100) }
-        catch (_: Exception) { status.setText(R.string.no_file_picker) }
+        catch (_: Exception) {
+            status.setText(R.string.no_file_picker)
+            if (!isEpg) playlistPickerReturn = null
+            val notice = AlertDialog.Builder(this).setMessage(R.string.no_file_picker)
+                .setPositiveButton(R.string.close, null).create()
+            notice.setOnDismissListener { onCancelled?.invoke() }
+            notice.show()
+        }
     }
     @Deprecated("Platform Activity document picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
+        if (requestCode != 100 && requestCode != 101) return
+        val returnToWizard = if (requestCode == 100) playlistPickerReturn.also { playlistPickerReturn = null } else null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) { returnToWizard?.invoke(); return }
         launchSafe {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val source = JSONObject().put("kind", "file").put("name", uri.lastPathSegment?.substringAfterLast('/') ?: getString(R.string.file_default_name)).put("uri", uri.toString())
