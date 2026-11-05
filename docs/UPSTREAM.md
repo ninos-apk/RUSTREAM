@@ -1,5 +1,16 @@
 # Herkunft und Wiederverwendung
 
+## Prüfnachweis korrigiert in 0.5.13 – 5. November 2026
+
+Die lokalen Prüfsummen von `recovery.rs` und `telemetry.rs` wurden an die bereits
+mit Android-Commit `b9d8cac869363143b9ed3c1d8739c9f80511b8f7` (0.5.9) eingeführten
+Anpassungen angeglichen. Geprüft wurden dessen vollständige Änderungen: begrenztes
+Live-Nachladen mit Fortschrittsprüfung und Video-Frame-Zähler als zusätzliche
+Fortschrittsquelle. Beide Dateien sind seit diesem Commit unverändert; 0.5.13
+ändert keinen Rust-Code. Die zuvor aufgezeichneten Referenzhashes bleiben als
+`upstream_sha256` erhalten. Anlass war die im vollständigen Release-Prüflauf
+fehlgeschlagene Manifestprüfung. Ergebnisse: [Vollbild-D-Pad 0.5.13](FULLSCREEN_DPAD_0513.md).
+
 ## Inhaltsbibliothek 0.4.0 – 17. Oktober 2026
 
 Die Parserregeln und Metadaten aus Windows-Commit `17dd21f41fd8a802df236ef1ce9d2c1087fb034e` wurden in die Android-Ableitung übertragen. `parse_stream`, Formatprüfung und Speichergrenzen bleiben erhalten; die produktive Seriengruppierung liegt in SQLite. Der ältere In-Memory-Pfad besitzt denselben Serienindex wie Windows. Fünf Inhaltsbibliothekstests sind bis auf den Crate-Namen übernommen. `upstream-sha256.json` dokumentiert lokalen Ableitungs- und Windows-Referenzhash. Einzelheiten und Prüfung: [Inhaltsbibliothek 0.4.0](CONTENT_LIBRARY_040.md). Die nachfolgenden Übernahmeberichte beschreiben frühere Zustände.

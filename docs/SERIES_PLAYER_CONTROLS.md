@@ -1,5 +1,13 @@
 # Episodenwechsel im Serienplayer
 
+Ab **0.5.13** können Fernbedienungen ohne Channel-Tasten mit Hoch/Runter direkt
+zur nächsten/vorherigen Episode wechseln, ausschließlich auf dem fokussierten
+Vollbildvideo. Serie und Staffel bleiben erhalten. OK öffnet weiterhin die
+Playerleiste; deren Pfeilnavigation und die Vorschau bleiben unverändert.
+Die Anfangs-/Vorherige-Aktion behält das bestehende Verhalten aus
+[Wiedergabesteuerung](PLAYBACK_CONTROLS.md). Neue Prüfnachweise:
+[Vollbild-D-Pad](FULLSCREEN_DPAD_0513.md).
+
 18. Oktober 2026. Ergänzung zum Serienlayout: **Vorherige Episode** und **Nächste Episode** als Transport-Icons in der bestehenden Playerleiste, in Vorschau und Vollbild. Die Beschriftung erscheint beim Fokussieren; Deutsch und Englisch sind vorhanden. Farben und bestehende Wiedergabeaktionen verwenden weiterhin `TvUi`.
 
 Die Buttons richten sich nach der tatsächlich ausgewählten Serienepisode. Das bloße Öffnen einer Serie während Live-/Film-Wiedergabe blendet sie nicht ein. Beim Durchstöbern eines anderen Bereichs behalten sie den Kontext der laufenden Episode. Bei Film- und Live-Wiedergabe sind beide Buttons samt Spalten verborgen.

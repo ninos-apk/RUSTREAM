@@ -1,0 +1,16 @@
+{
+  "version": "0.5.13",
+  "reviewed": true,
+  "de": [
+    "Im Vollbildvideo wechseln Hoch und Runter zum nächsten bzw. vorherigen Live-Sender. Damit ist direktes Umschalten auch mit Fernbedienungen ohne Channel-Tasten möglich, etwa am Fire TV Stick.",
+    "Für Serien wechseln Hoch und Runter im Vollbild die Episode innerhalb derselben Serie und Staffel. Gedrückthalten löst keine weiteren Wechsel aus.",
+    "OK öffnet weiterhin die Playerleiste. Deren Pfeilnavigation sowie die Bedienung in Vorschau, Listen und Filmen bleiben erhalten; separate Channel- und Medientasten funktionieren wie bisher.",
+    "Der technische Prüfnachweis der Core-Herkunft wurde für zwei bereits in Version 0.5.9 angepasste Module korrigiert; der Rust-Code bleibt unverändert."
+  ],
+  "en": [
+    "In fullscreen video, Up and Down switch to the next or previous live channel. Remotes without channel buttons, such as Fire TV Stick remotes, can now switch channels directly.",
+    "For series, Up and Down in fullscreen switch episodes within the same show and season. Holding a key does not trigger additional switches.",
+    "OK still opens the player controls. Arrow navigation within the controls and operation in preview, lists and movies are preserved; dedicated channel and media buttons work as before.",
+    "The technical core provenance record was corrected for two modules already adapted in version 0.5.9; Rust code is unchanged."
+  ]
+}

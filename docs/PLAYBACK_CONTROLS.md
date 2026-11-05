@@ -1,5 +1,21 @@
 # Wiedergabesteuerung und VOD-Nachladen (23. Oktober 2026)
 
+## Hoch/Runter im Vollbild ab 0.5.13
+
+Bei Live-TV und Serien öffnet **Hoch den nächsten**, **Runter den vorherigen**
+Eintrag, wenn das Vollbildvideo den Fokus hat. Das entspricht Channel +/− und
+verwendet dieselbe Auswahl (Kategorie, Suche bzw. Favoriten/Verlauf); Serien
+bleiben innerhalb der aktuellen Serie und Staffel. Am Rand gibt es keinen Umlauf.
+Jeder eigenständige Druck wechselt einmal; Wiederholungen beim Halten werden
+abgefangen. **OK** öffnet weiterhin die Playerleiste. Dort bleibt Hoch für die
+Rückkehr zum Video reserviert, Runter wechselt keinen Eintrag und Links/Rechts
+navigiert zwischen Aktionen. Zurück schließt zunächst die Leiste, danach Vollbild.
+
+In Vorschau, Bibliothekslisten und Filmen bleiben die bisherigen Pfeilbelegungen
+erhalten. Die Belegung folgt dem abgespielten Inhalt, auch wenn im Hintergrund
+ein anderer Bibliotheksbereich geöffnet ist. Separate Channel- und Medientasten
+bleiben erhalten. Umsetzung und aktuelle Nachweise: [Vollbild-D-Pad 0.5.13](FULLSCREEN_DPAD_0513.md).
+
 ## Zum Anfang und vorherige Episode
 
 Der linke Navigationsbutton springt beim ersten Druck immer auf 00:00. Bei Serien

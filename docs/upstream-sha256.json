@@ -7,7 +7,9 @@
   },
   {
     "path": "src/recovery.rs",
-    "sha256": "748F2D01BE0EEA2A987804D262FE0CD01CF8A7A86D9BF2FA564477435D1E06C0"
+    "sha256": "6D91951606C1971CAE9260DC20E3E9473117A836792BBBCF95820AE575CF1FD0",
+    "upstream_sha256": "748F2D01BE0EEA2A987804D262FE0CD01CF8A7A86D9BF2FA564477435D1E06C0",
+    "adaptation": "Android b9d8cac (0.5.9): bounded live refill progress/deadlines and video-frame progress; source unchanged since that commit, manifest reconciled in 0.5.13"
   },
   {
     "path": "src/buffering.rs",
@@ -15,6 +17,8 @@
   },
   {
     "path": "src/telemetry.rs",
-    "sha256": "6B8E122227E820A7D3F812FFEBBED50750B7FF295FF53B767D991495D03C3E94"
+    "sha256": "36D7A2B4C1EF2F39A31F99747D75A2B9F106D112AD8EE624574BFB9C3AD73D33",
+    "upstream_sha256": "6B8E122227E820A7D3F812FFEBBED50750B7FF295FF53B767D991495D03C3E94",
+    "adaptation": "Android b9d8cac (0.5.9): optional submitted video-frame count; source unchanged since that commit, manifest reconciled in 0.5.13"
   }
 ]

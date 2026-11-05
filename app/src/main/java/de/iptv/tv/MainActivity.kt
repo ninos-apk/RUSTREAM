@@ -1105,6 +1105,7 @@ class MainActivity : ComponentActivity() {
         val id=selectedId
         val context=playContext
         val series=id!=null&&context?.kind=="series"&&context.show!=null
+        playerPane.verticalNavigationEnabled=id!=null&&(context?.kind=="live"||series)
         if(!series||playerPane.buttons.getValue("next_episode").visibility!=View.VISIBLE)
             playerPane.setEpisodeNavigation(series, restart=id!=null&&context?.kind in setOf("movies","series"))
         if(!series)return
@@ -1173,6 +1174,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
             "next_episode" -> navigateSeriesEpisode(1)
+            "channel_up", "channel_down" -> if(fullScreen&&playerPane.verticalNavigationEnabled)
+                navigatePlayback(if(action=="channel_up")1 else -1)
             "stop" -> launchSafe { restartPreviousPress.reset(); playerPane.cancelSeek(); playback.stop(); channelRows.notifyDataSetChanged(); playerPane.showControls(true) }
             "reconnect" -> {
                 if(reconnectWork?.isActive==true || busy || selectedId==null) return

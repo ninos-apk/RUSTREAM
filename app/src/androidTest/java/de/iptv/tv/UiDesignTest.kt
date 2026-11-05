@@ -137,7 +137,7 @@ class UiDesignTest {
                     waitFor("Same active channel opens fullscreen",{pane(it).isFullscreen},scenario)
                     scenario.onTvActivity { assertSame(before,controller(it).player) }
                     device.executeShellCommand("screencap -p /sdcard/Download/ui-design-fullscreen.png")
-                    device.pressDPadDown();device.pressDPadDown()
+                    device.pressDPadCenter();device.pressDPadDown()
                     waitFor("Fullscreen controls stay inside fullscreen on Down",{pane(it).isFullscreen && pane(it).buttons.values.any { button -> button.hasFocus() }},scenario)
                     device.pressDPadUp()
                     waitFor("Fullscreen controls up returns to video",{pane(it).video.hasFocus() && !pane(it).controlsVisible},scenario)

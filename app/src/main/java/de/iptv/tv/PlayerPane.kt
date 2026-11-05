@@ -88,6 +88,8 @@ class PlayerPane(
     private var statusText = ""
     private var guideText = ""
     var hasSelection = false
+    /** Follows the selected playback context, not the section currently being browsed. */
+    var verticalNavigationEnabled = false
     /** Null while the current item has no stable key (older catalog, unclassified entry). */
     private var favorite: Boolean? = null
     var isFullscreen = false; private set
@@ -327,6 +329,15 @@ class PlayerPane(
                 }
             }
             return false
+        }
+        // Keep arrows inside the control bar; OK always provides a path to those controls.
+        if (isFullscreen && video.hasFocus() && hasSelection && verticalNavigationEnabled &&
+            event.keyCode in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN)) {
+            if (event.repeatCount == 0) {
+                cancelSeek()
+                action(if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) "channel_up" else "channel_down")
+            }
+            return true
         }
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {

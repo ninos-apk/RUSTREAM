@@ -173,6 +173,9 @@ class NavigationStateTest {
             waitFor("Movie category"){shows("Two Film 2",it)&&!shows("One Film 2",it)}
             device.findObject(By.textStartsWith("Live (")).click()
             waitFor("Live list"){shows("Channel 01-1",it)}
+            // History/favourites precede the categories; bring Live 05 into view by remote.
+            press("Alle Kategorien")
+            repeat(5){device.pressDPadDown()}
             press("Live 05 (2)")
             waitFor("Live category"){shows("Channel 05-2",it)}
             device.findObject(By.textStartsWith("Series (")).click()
