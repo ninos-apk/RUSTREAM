@@ -1,0 +1,12 @@
+{
+  "version": "0.5.14",
+  "reviewed": true,
+  "de": [
+    "Wenn bei einem spulbaren Film oder einer Serienfolge das Bild hängen bleibt und der Ton weiterläuft, versucht der Player automatisch, das Bild an der aktuellen Wiedergabeposition wiederherzustellen.",
+    "Die Wiederaufnahme ist auf zwei Versuche pro anhaltender Störung begrenzt. Der Diagnosebericht erfasst den Eingriff und die Wiedergabeposition."
+  ],
+  "en": [
+    "If the picture freezes while audio continues in a seekable movie or episode, the player automatically tries to restore video at the current playback position.",
+    "Recovery is limited to two attempts per ongoing stall. The diagnostic report records each attempt and its playback position."
+  ]
+}

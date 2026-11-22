@@ -60,6 +60,7 @@ class PlaybackController(
     private var ingress = IngressMeter()
     private val refillWatchdog = VodRefillWatchdog()
     private val videoWatchdog = LiveVideoWatchdog()
+    private var vodVideoWatchdog = VodVideoWatchdog()
     private var videoFrames = AtomicLong()
     private val recoveryEvents = ArrayDeque<JSONObject>()
     private var lastCoreHealth = JSONObject()
@@ -76,6 +77,7 @@ class PlaybackController(
     /** Returns the selection token used for this item's samples. */
     suspend fun select(revision: Long, id: Long, resumeSec: Double? = null): Long = operations.withLock {
         val command = core.call("select", "revision" to revision, "id" to id, "resume" to resumeSec)
+        vodVideoWatchdog = VodVideoWatchdog()
         selected = true; terminal = false; userPaused = false
         lastError=null
         recoveryEvents.clear()
@@ -116,7 +118,20 @@ class PlaybackController(
                                 recordRecovery("video_frame_stall", rate)
                                 apply(core.call("ended", "attempt" to attempt, "error" to true))
                             }
-                            if (player === current && refillWatchdog.shouldRetry(
+                            if (player === current && vodVideoWatchdog.shouldReload(now, current.currentPosition, frames,
+                                    active = !live && foreground && phase == "playing" && current.isPlaying &&
+                                        current.isCurrentMediaItemSeekable && current.audioFormat != null &&
+                                        current.videoFormat != null && view.videoSurfaceView?.isShown == true &&
+                                        (current.duration == C.TIME_UNSET || current.duration - current.currentPosition > 2_000))) {
+                                // An in-buffer seek to the current millisecond can be elided. Reopen the
+                                // source at the running clock to discard the future-dated decoder queue.
+                                val position = current.currentPosition
+                                val item = checkNotNull(current.currentMediaItem)
+                                recordRecovery("vod_video_frame_stall", rate)
+                                refillWatchdog.reset()
+                                current.setMediaItem(item, position)
+                                current.prepare()
+                            } else if (player === current && refillWatchdog.shouldRetry(
                                     SystemClock.elapsedRealtime(),
                                     active = !live && !suspended && phase in setOf("playing", "buffering"),
                                     positionMs = current.currentPosition.coerceAtLeast(0),
@@ -276,6 +291,9 @@ class PlaybackController(
         videoFrames = frameCounter
         p.setVideoFrameMetadataListener { _, _, _, _ -> frameCounter.incrementAndGet() }
         p.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (player === p && !isPlaying) vodVideoWatchdog.interrupt()
+            }
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== p || attempt != token) return
                 val httpCode = generateSequence(error as Throwable) { it.cause }
@@ -313,6 +331,7 @@ class PlaybackController(
                 if (playbackState == Player.STATE_ENDED) scope.launch { operations.withLock { if (player === p && attempt == token) apply(core.call("ended", "attempt" to token, "error" to false)) } }
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (player === p) vodVideoWatchdog.interrupt()
                 if (player === p && reason == Player.DISCONTINUITY_REASON_SEEK) {
                     refillWatchdog.reset()
                     scope.launch { operations.withLock { if (player === p && attempt == token) core.call("seek") } }
@@ -396,6 +415,7 @@ class PlaybackController(
         }
     }
     fun releasePlayer() {
+        vodVideoWatchdog.interrupt()
         refillWatchdog.reset()
         videoWatchdog.reset()
         cancelRetry()

@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 val safeTestAssets by tasks.registering(Sync::class) {
-    from("src/androidTest/assets") { include("fixture.mp4") }
+    from("src/androidTest/assets") { include("fixture.mp4", "vod-pts-jump.mkv") }
     into(layout.buildDirectory.dir("generated/safeTestAssets"))
 }
 android {
@@ -18,8 +18,8 @@ android {
         applicationId = "de.iptv.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 24
-        versionName = "0.5.13"
+        versionCode = 25
+        versionName = "0.5.14"
         val digest = MessageDigest.getInstance("SHA-256")
         rootProject.fileTree("crates").matching { include("**/*.rs", "**/Cargo.toml") }.files.sortedBy { it.path }.forEach { digest.update(it.readBytes()) }
         buildConfigField("String", "CORE_BUILD_ID", "\"" + digest.digest().joinToString("") { "%02x".format(it) }.take(16) + "\"")
@@ -36,7 +36,7 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = false } }
-    // Provider lists can contain credentials. Only the synthetic video belongs in test APKs.
+    // Provider lists can contain credentials. Package only the allowlisted synthetic videos.
     sourceSets.getByName("androidTest").assets.setSrcDirs(listOf(layout.buildDirectory.dir("generated/safeTestAssets")))
     testOptions { unitTests.isReturnDefaultValues = true }
     lint { abortOnError = true; checkReleaseBuilds = true }

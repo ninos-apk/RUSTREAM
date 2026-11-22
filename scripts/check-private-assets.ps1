@@ -5,7 +5,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive=[System.IO.Compression.ZipFile]::OpenRead((Join-Path $tvRoot $Apk))
 try {
     $assets=@($archive.Entries | Where-Object { $_.FullName -like 'assets/*' -and $_.Length -gt 0 })
-    if ($assets | Where-Object FullName -ne 'assets/fixture.mp4') { throw 'Unexpected private data in test APK assets' }
-    if (!($assets | Where-Object FullName -eq 'assets/fixture.mp4')) { throw 'Synthetic test fixture missing' }
-    Write-Host 'Test APK contains only the synthetic video asset; private provider lists excluded.'
+    $expected = @('assets/fixture.mp4', 'assets/vod-pts-jump.mkv')
+    if (Compare-Object $expected @($assets | ForEach-Object FullName)) { throw 'Test APK assets differ from the synthetic fixture allowlist' }
+    Write-Host 'Test APK contains both allowlisted synthetic video assets.'
 } finally { $archive.Dispose() }
