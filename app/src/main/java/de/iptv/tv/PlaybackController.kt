@@ -60,6 +60,9 @@ class PlaybackController(
     private var ingress = IngressMeter()
     private val refillWatchdog = VodRefillWatchdog()
     private val videoWatchdog = LiveVideoWatchdog()
+    private val liveConfirmation = LiveRecoveryConfirmation()
+    private var lastFrameBeforeRecoveryMs: Long? = null
+    private var liveWindowRetried = false
     private var vodVideoWatchdog = VodVideoWatchdog()
     private var videoFrames = AtomicLong()
     private val recoveryEvents = ArrayDeque<JSONObject>()
@@ -83,6 +86,8 @@ class PlaybackController(
         recoveryEvents.clear()
         lastCoreHealth = JSONObject()
         recoveryPending = false
+        lastFrameBeforeRecoveryMs = null
+        liveWindowRetried = false
         val token = ++selection
         apply(command)
         token
@@ -111,12 +116,18 @@ class PlaybackController(
                                 "cache_end" to current.bufferedPosition.coerceAtLeast(0) / 1000.0,
                                 "buffering" to (current.playbackState == Player.STATE_BUFFERING), "ingress" to rate,
                                 "video_frames" to frames.takeIf { live && current.videoFormat != null }))
-                            if (player === current && videoWatchdog.shouldRetry(now,
-                                    active = live && !suspended && phase == "playing" && current.isPlaying &&
-                                        current.videoFormat != null && view.isShown,
-                                    frames = frames)) {
-                                recordRecovery("video_frame_stall", rate)
-                                apply(core.call("ended", "attempt" to attempt, "error" to true))
+                            if (player === current && live) {
+                                val buffering = current.playbackState == Player.STATE_BUFFERING
+                                val hasVideo = current.currentTracks.isTypeSelected(C.TRACK_TYPE_VIDEO) || current.videoFormat != null
+                                val visible = view.videoSurfaceView?.isShown == true
+                                if (videoWatchdog.shouldRetry(now,
+                                        active = !suspended && (current.isPlaying || buffering) && hasVideo && visible,
+                                        frames = frames, buffering = buffering)) {
+                                    recordRecovery("video_frame_stall", rate)
+                                    apply(core.call("ended", "attempt" to attempt, "error" to true))
+                                } else if (recoveryPending) {
+                                    confirmLiveRecovery(current, now, hasVideo, visible)
+                                }
                             }
                             if (player === current && vodVideoWatchdog.shouldReload(now, current.currentPosition, frames,
                                     active = !live && foreground && phase == "playing" && current.isPlaying &&
@@ -189,6 +200,7 @@ class PlaybackController(
     suspend fun stop() = operations.withLock {
         val wasSelected = selected
         selected = false; terminal = false
+        recoveryPending = false
         title = ""
         core.call("stop")
         releasePlayer()
@@ -227,12 +239,12 @@ class PlaybackController(
             if (phase == "waiting") {
                 if (previousPhase != "waiting") {
                     recordRecovery(command.optString("recovery_reason", "unknown"))
-                    recoveryPending = true
+                    beginRecovery()
                     player?.stop()
                 }
                 scheduleRetry(command)
             } else cancelRetry()
-            if (phase == "playing" && recoveryPending) {
+            if (!live && phase == "playing" && recoveryPending) {
                 recordRecovery("recovered")
                 recoveryPending = false
             }
@@ -292,7 +304,13 @@ class PlaybackController(
         p.setVideoFrameMetadataListener { _, _, _, _ -> frameCounter.incrementAndGet() }
         p.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (player === p && !isPlaying) vodVideoWatchdog.interrupt()
+                if (player !== p || isPlaying) return
+                vodVideoWatchdog.interrupt()
+                liveConfirmation.reset()
+                if (!p.playWhenReady || p.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) videoWatchdog.reset()
+            }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (player === p && !playWhenReady) videoWatchdog.reset()
             }
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== p || attempt != token) return
@@ -319,7 +337,22 @@ class PlaybackController(
                     phase = "error"
                     scope.launch { operations.withLock { if (player === p && attempt == token) core.call("pause", "paused" to true) } }
                     status(detail.message(context))
-                } else scope.launch { operations.withLock { if (player === p && attempt == token) {apply(core.call("ended", "attempt" to token, "error" to true));status(context.getString(R.string.playback_retrying, detail.message(context)))} } }
+                } else scope.launch { operations.withLock {
+                    if (player !== p || attempt != token || terminal || !foreground) return@withLock
+                    if (live && error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW &&
+                        !liveWindowRetried && phase != "waiting" && p.playWhenReady) {
+                        liveWindowRetried = true
+                        beginRecovery()
+                        recordRecovery("behind_live_window")
+                        videoWatchdog.reset()
+                        p.seekToDefaultPosition()
+                        p.prepare()
+                        core.call("seek")
+                    } else {
+                        apply(core.call("ended", "attempt" to token, "error" to true))
+                        status(context.getString(R.string.playback_retrying, detail.message(context)))
+                    }
+                } }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (player !== p || attempt != token) return
@@ -333,6 +366,8 @@ class PlaybackController(
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 if (player === p) vodVideoWatchdog.interrupt()
                 if (player === p && reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    videoWatchdog.reset()
+                    liveConfirmation.reset()
                     refillWatchdog.reset()
                     scope.launch { operations.withLock { if (player === p && attempt == token) core.call("seek") } }
                 }
@@ -383,21 +418,42 @@ class PlaybackController(
             format = if (format != null && format.width > 0 && format.height > 0) "${format.width} × ${format.height}" else "",
         ))
     }
+    private fun beginRecovery() {
+        if (!recoveryPending) lastFrameBeforeRecoveryMs = videoWatchdog.lastFrameProgressMs
+        recoveryPending = true
+        liveConfirmation.reset()
+    }
+
+    private fun confirmLiveRecovery(p: ExoPlayer, now: Long, hasVideo: Boolean, visible: Boolean) {
+        if (phase != "playing" || !p.isPlaying) { liveConfirmation.reset(); return }
+        val counters = p.videoDecoderCounters?.takeIf { hasVideo && visible }
+        counters?.ensureUpdated()
+        val radio = !p.currentTracks.containsType(C.TRACK_TYPE_VIDEO) && !hasVideo &&
+            p.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO)
+        if (!liveConfirmation.confirmed(now, counters?.renderedOutputBufferCount, p.currentPosition.takeIf { radio })) return
+        val gap = lastFrameBeforeRecoveryMs?.takeIf { hasVideo }?.let { liveConfirmation.firstAdvanceMs!! - it }
+        recordRecovery("recovered", videoGapMs = gap)
+        recoveryPending = false
+        lastFrameBeforeRecoveryMs = null
+        liveWindowRetried = false
+    }
+
     /** Bounded, credential-free snapshots for distinguishing transport and renderer stalls. */
-    private fun recordRecovery(reason: String, rate: Long? = lastIngressRate) {
+    private fun recordRecovery(reason: String, rate: Long? = lastIngressRate, videoGapMs: Long? = null) {
         val current = player
         val event = JSONObject().put("reason", reason).put("attempt", attempt).put("time_ms",System.currentTimeMillis())
             .put("elapsed_ms", SystemClock.elapsedRealtime()).put("buffered_ms", current?.totalBufferedDuration)
             .put("player_state", current?.playbackState).put("position_ms", current?.currentPosition)
             .put("received_bytes", ingress.totalBytes).put("ingress_bytes_per_second", rate)
             .put("video_frames", videoFrames.get()).put("media3_code", lastError?.optInt("media3_code"))
+        if (videoGapMs != null) event.put("video_gap_ms", videoGapMs)
         recoveryEvents.addLast(event)
         log.record(if(reason=="recovered") DiagnosticLevel.INFO else DiagnosticLevel.WARN,"Recovery",
             if(reason=="recovered") DiagnosticMessage.RECOVERED else DiagnosticMessage.RECOVERY,
             "reason" to reason,"attempt" to attempt,"buffered_ms" to current?.totalBufferedDuration,
             "player_state" to current?.playbackState,"position_ms" to current?.currentPosition,
             "received_bytes" to ingress.totalBytes,"ingress_bytes_per_second" to rate,"video_frames" to videoFrames.get(),
-            "media3_code" to lastError?.opt("media3_code"))
+            "media3_code" to lastError?.opt("media3_code"), "video_gap_ms" to videoGapMs)
         while (recoveryEvents.size > 20) recoveryEvents.removeFirst()
     }
     fun diagnostics(): JSONObject = JSONObject().put("profile", bufferProfile.key).put("live", live)
@@ -415,6 +471,7 @@ class PlaybackController(
         }
     }
     fun releasePlayer() {
+        liveConfirmation.reset()
         vodVideoWatchdog.interrupt()
         refillWatchdog.reset()
         videoWatchdog.reset()

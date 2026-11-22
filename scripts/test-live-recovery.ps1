@@ -24,7 +24,7 @@ if ($LASTEXITCODE) { throw 'App installation failed' }
 if ($LASTEXITCODE) { throw 'Test installation failed' }
 $out = "$tvRoot/artifacts/live-recovery"
 New-Item -ItemType Directory -Force $out | Out-Null
-$classes = 'de.iptv.tv.LiveRecoveryTest,de.iptv.tv.PlaybackRecoveryPolicyTest,de.iptv.tv.BufferProfileTest#threeLiveChoicesPersistAndOldCustomChoiceMigrates,de.iptv.tv.TvEndToEndTest#liveProfileEofTimerAndPendingRetryCancellation'
+$classes = 'de.iptv.tv.LiveRecoveryTest,de.iptv.tv.LiveVideoRecoveryTest,de.iptv.tv.PlaybackRecoveryPolicyTest,de.iptv.tv.BufferProfileTest#threeLiveChoicesPersistAndOldCustomChoiceMigrates,de.iptv.tv.TvEndToEndTest#liveProfileEofTimerAndPendingRetryCancellation'
 & adb -s $Serial shell am instrument -w -r -e class $classes de.iptv.tv.test/androidx.test.runner.AndroidJUnitRunner | Tee-Object -FilePath "$out/instrumentation.txt"
 $result = Get-Content -Raw -LiteralPath "$out/instrumentation.txt"
-if ($result -match 'AssumptionViolatedException|INSTRUMENTATION_STATUS_CODE: -' -or $result -notmatch 'OK \(5 tests\)') { throw 'Live recovery tests failed; see artifacts/live-recovery/instrumentation.txt' }
+if ($result -match 'AssumptionViolatedException|INSTRUMENTATION_STATUS_CODE: -' -or $result -notmatch 'OK \(7 tests\)') { throw 'Live recovery tests failed; see artifacts/live-recovery/instrumentation.txt' }

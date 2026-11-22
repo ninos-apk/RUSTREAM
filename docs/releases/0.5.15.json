@@ -1,0 +1,14 @@
+{
+  "version": "0.5.15",
+  "reviewed": true,
+  "de": [
+    "Bleibt ein Live-Bild stehen, erkennt der Player den Hänger auch bei wiederholten kurzen Pufferpausen.",
+    "Bei einem abgelaufenen Livefenster versucht der Player zunächst, im selben Sender direkt an der aktuellen Standardposition weiterzuspielen.",
+    "Der Diagnosebericht bestätigt die Rückkehr des Live-Bildes anhand neu gerenderter Bilder. Bei Radiosendern zählt der Fortschritt der Wiedergabeposition."
+  ],
+  "en": [
+    "The player now detects a frozen live picture even when short buffering interruptions recur.",
+    "If the live window expires, the player first tries to resume the same channel at the window’s current default position.",
+    "The diagnostic report confirms live video recovery when new frames are rendered. For radio channels, it checks that the playback position advances."
+  ]
+}

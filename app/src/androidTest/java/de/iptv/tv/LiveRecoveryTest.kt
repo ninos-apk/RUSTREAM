@@ -73,7 +73,11 @@ class LiveRecoveryTest {
                     val deadline = SystemClock.elapsedRealtime() + 30_000
                     while (!recovered && SystemClock.elapsedRealtime() < deadline) {
                         instrumentation.runOnMainSync {
-                            recovered = playback.player?.let { it.isPlaying && it.currentPosition >= 500 } == true &&
+                            recovered = playback.player?.let {
+                                val counters = it.videoDecoderCounters
+                                counters?.ensureUpdated()
+                                it.isPlaying && (counters?.renderedOutputBufferCount ?: 0) >= 3
+                            } == true &&
                                 diagnosticLog.snapshot().events.any { it.message==DiagnosticMessage.RECOVERED }
                         }
                         if (!recovered) SystemClock.sleep(50)

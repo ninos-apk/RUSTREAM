@@ -95,7 +95,7 @@ class DiagnosticLog(private val capacity: Int = 500,
         private val numericFields = setOf("http_status", "media3_code", "errno", "retryable", "terminal", "attempt",
             "operation_id", "count", "skipped", "bytes", "total_ms", "restore_ms", "retry_in_ms", "retries",
             "buffered_ms", "player_state", "position_ms", "received_bytes", "ingress_bytes_per_second",
-            "video_frames", "live", "activated", "cached")
+            "video_frames", "video_gap_ms", "live", "activated", "cached")
     }
 }
 

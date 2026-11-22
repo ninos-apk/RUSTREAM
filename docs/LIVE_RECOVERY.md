@@ -1,6 +1,6 @@
 # Live-Puffer und automatische Wiederherstellung
 
-Stand: 23. Oktober 2026, Android TV.
+Stand 22. November 2026, Android TV.
 
 ## Profile
 
@@ -42,9 +42,14 @@ Fehler endgültig.
   die abspielbare Pufferdauer muss wachsen.
 - Frame-Callbacks belegen Wiedergabefortschritt auch bei gleichbleibender
   relativer Position in einem wandernden Live-Zeitfenster.
-- Sichtbares, aktiv spielendes Live-Video ohne neue Frame-Callbacks wird nach
-  12 s neu aufgebaut. Pause, unterdrückte Wiedergabe, Buffering, unsichtbare
-  Ausgabe und reine Audiokanäle setzen diesen Timer zurück.
+- Sichtbares Live-Video löst nach zwölf aktiven Wiedergabesekunden ohne neue
+  Frame-Callbacks einen Neuaufbau aus. Beim Puffern ruht diese Uhr. Sobald die
+  Wiedergabe weiterläuft, zählt sie weiter. Neue Frames, Pause, unterdrückte
+  Wiedergabe, eine ausgeblendete Ausgabe und Senderwechsel verwerfen die Messung.
+- Bei `ERROR_CODE_BEHIND_LIVE_WINDOW` springt der aktive Player direkt zur
+  Standardposition des Livefensters und bereitet die Wiedergabe erneut vor.
+  Wiederholt sich der Fehler vor bestätigter Erholung, übernimmt die Rust-Recovery
+  mit ihrem regulären Wiederholungsabstand.
 
 Frame-Metadaten melden die Übergabe an die Videoausgabe. Ein vom Anbieter als
 reguläre neue Frames gesendetes Standbild oder ein Fehler unterhalb dieser
@@ -58,9 +63,13 @@ Wiederaufnahme an der gespeicherten Position.
 
 Der Diagnosebericht enthält `playback_health` mit Phase, Core-Status und maximal
 20 Wiederherstellungsereignissen: Auslöser, monotone Zeit, Puffer, Position,
-Datenmenge, letzte Empfangsrate und Framezahl. `recovered` bedeutet erneut
-beobachtete Wiedergabe. Die neuen Ereignisse enthalten keine Stream-URLs oder
-Zugangsdaten.
+Datenmenge, letzte Empfangsrate und Framezahl. Bei sichtbarem Live-Video bestätigt
+`recovered` zwei aufeinanderfolgende Messintervalle mit steigender Zahl gerenderter
+Bilder. Bei einem reinen Radiosender wird dafür die Medienposition geprüft.
+Wenn vor der Störung Bildfortschritt gemessen wurde, erfasst `video_gap_ms` den
+Abstand zwischen der letzten beobachteten Frameübergabe und dem ersten bestätigten
+Fortschrittsintervall danach. Die Abtastung erfolgt ungefähr einmal pro Sekunde.
+[Prüfbericht für Version 0.5.15](LIVE_RECOVERY_0515.md)
 
 Rust-Tests prüfen nutzlosen Datenempfang, Startwartezeit, harte Live-Deadline
 und laufende Frames bei konstanter Position. Kotlin-Tests prüfen den Frame-Timer.
@@ -69,10 +78,10 @@ nach dreimaligem Live-404/410, lokale Retry-Grenzen, Profile/Migration, Live-EOF
 und das Abbrechen geplanter Wiederholungen. `scripts/test-playback-controls.ps1`
 prüft zusätzlich VOD-Reserve, stockende Downloads, Spulen und Seriensteuerung.
 
-Prüfergebnis dieser Änderung: 104 Kotlin-Unit-Tests bestanden, Rust-Workspace-
-Tests und Clippy erfolgreich, Android-Lint ohne Fehler sowie neun unterschiedliche
-gezielte Android-Tests bestanden (je fünf in beiden Skripten, ein Profiltest ist
-in beiden Gruppen enthalten). Debug-App und Test-APK wurden gebaut.
+Bei der ursprünglichen Abnahme im Oktober 2026 bestanden 104 Kotlin-Unit-Tests, Rust-Workspace-
+Tests und Clippy. Android-Lint meldete keine Fehler. Neun unterschiedliche
+gezielte Android-Tests bestanden (je fünf in beiden Skripten, ein Profiltest war
+in beiden Gruppen enthalten).
 
 Emulatortests ersetzen keinen Dauertest auf dem betroffenen Fernseher mit dem
 Anbieter. Ausfälle über die vorhandene Reserve hinaus unterbrechen weiterhin

@@ -1,5 +1,7 @@
 # RUSTREAM IPTV PLAYER – Android TV / Google TV
 
+**Version 0.5.15 (22. November 2026)** erkennt Live-Standbilder auch bei kurzen Pufferunterbrechungen. Läuft das Livefenster ab, setzt der Player direkt an der aktuellen Standardposition ein. Der Diagnosebericht bestätigt die Bildrückkehr anhand gerenderter Frames. [Live-Wiederherstellung und Prüfnachweise](docs/LIVE_RECOVERY_0515.md)
+
 **Version 0.5.14 (22. November 2026)** erkennt ein stehendes Bild bei weiterlaufendem Ton in spulbaren Filmen und Serien. Der Player setzt automatisch an der inzwischen erreichten Wiedergabeposition neu ein. [Verhalten und Prüfnachweis](docs/VOD_FRAME_RECOVERY.md)
 
 **Version 0.5.13 (5. November 2026):** Im fokussierten Vollbildvideo wechseln Hoch/Runter den Live-Sender oder die Serienepisode – auch mit Fernbedienungen ohne Kanaltasten, etwa am Fire TV Stick. Hoch öffnet den nächsten, Runter den vorherigen Eintrag. OK öffnet die Playerleiste; dort bleibt die Pfeilnavigation erhalten. Vorschau, Listen, Filme und Channel +/− behalten ihre bisherige Bedienung. Details und Prüfnachweise: [Vollbild mit D-Pad](docs/FULLSCREEN_DPAD_0513.md).
